@@ -1,243 +1,95 @@
-# Maps Outreach Agent
+# GeoProspector AI — Local Lead Generation & Automated Outreach
 
-A LangGraph agent that finds nearby businesses on Google Maps, **enriches
-them with email/social/quality data**, scores lead quality, drafts a
-personalized outreach pitch, and sends it by email — with a mandatory
-human approval step before anything goes out.
+**GeoProspector AI** (formerly Maps Outreach Agent) is a powerful, self-hosted LangGraph agent and web dashboard designed to automate B2B lead generation. It scrapes Google Maps to find local businesses, enriches them with contact information, scores their digital presence, and uses AI to draft hyper-personalized cold outreach pitches.
 
-```
-START
-  |
-  v
-search_places  (Google Places API — Text/Nearby Search, New)
-  |
-  v
-[loop over each business, one at a time]
-  |
-  +──> check_website        (classify: none / social_only / dead / outdated / good)
-  |        |
-  |        +── good website? → save + skip
-  |        |
-  |        +── prospect? → continue ↓
-  |
-  +──> find_email           (website scrape → DuckDuckGo search → Hunter.io)
-  +──> find_socials         (DuckDuckGo: Facebook, Instagram, owner name)
-  +──> score_lead           (0-100 composite score)
-  |        |
-  |        +── low score? → save + skip
-  |        |
-  |        +── qualified? → continue ↓
-  |
-  +──> analyze_business     (Gemini: enrichment-aware talking points)
-  +──> generate_pitch       (Gemini: two-track — no site vs outdated)
-  +──> save_to_crm          (local SQLite db)
-  +──> human_approval       (interrupt() — you approve / edit / reject)
-  +──> send_email           (SMTP — only runs if approved)
-  |
-  v
-END + run summary
-```
+Whether you run a web design agency, a marketing firm, or a SaaS company, GeoProspector AI allows you to instantly find high-ticket local clients (like roofers, HVAC contractors, and medi-spas) and extract their data with a single click.
 
-## What's new (v2)
+![GeoProspector AI Dashboard](https://img.shields.io/badge/Status-Active-success) ![License](https://img.shields.io/badge/License-MIT-blue)
 
-- **Website quality analysis** — not just alive/dead. Detects outdated CMS
-  versions, missing mobile viewport, old copyright years, parked/construction
-  pages, and social-only listings.
-- **Multi-source email discovery** — scrapes business websites (including
-  `/contact` and `/about` pages), searches DuckDuckGo, then falls back to
-  Hunter.io. Filters out junk emails automatically.
-- **Social media discovery** — finds Facebook pages, Instagram profiles, and
-  owner/manager names via web search.
-- **Lead scoring** — 0-100 composite score based on website status, Google
-  reviews/rating, email availability, social presence, and business category.
-  Low-score leads are auto-skipped to save your time.
-- **Honest AI prompts** — the pitch generator never claims fake experience or
-  fabricated client lists. Two-track pitching: "build a website" vs "modernize
-  your outdated site."
-- **Run summary** — end-of-run stats showing how many leads were found,
-  qualified, emailed, etc.
+---
 
-## Why it's built this way
+## 🚀 Key Features
 
-- **One business at a time, not a giant fan-out.** LangGraph's `Send` API
-  can fan work out in parallel, but combining that with per-branch
-  `interrupt()` human approval is still a sharp edge in LangGraph as of
-  mid-2026 (interrupts inside parallel `Send` branches can be fiddly to
-  resume correctly). For a first working version, `main.py` invokes the
-  graph **once per business**, each with its own `thread_id`, so every
-  approval step is simple and unambiguous. Once this works end-to-end for
-  you, batching/parallelizing is a small, safe follow-up change (see
-  "Next steps" below).
-- **Google Places API (New)**, not the legacy API — Google no longer allows
-  new projects to enable the legacy Places API.
-- **Field masking is mandatory.** Places API (New) bills you at the tier
-  of the *most expensive field* in your request. This repo requests `rating`
-  and `userRatingCount` (Pro-tier) alongside `websiteUri` (also Pro-tier),
-  so no additional billing impact.
-- **A local quota guard** (`quota.py`) tracks how many Places API calls
-  you've made this calendar month in a small JSON file and refuses to make
-  more once you hit the cap you set in `.env`. This is a *client-side*
-  safety net, not a replacement for the budget alerts you should also set
-  in Google Cloud Console.
+* **Intelligent Google Maps Scraping:** Uses the new Google Places API to find highly targeted local businesses in specific geographic radii.
+* **Built-in AI Niche Generator:** Don't know who to target? The built-in Gemini AI niche generator brainstorms high-ticket, low-tech industries in booming US cities and auto-fills your search.
+* **Deep Data Enrichment:** Automatically scrapes websites, searches DuckDuckGo, and queries Hunter.io to find owner names, emails, Facebook pages, and Instagram profiles.
+* **Automated Website Auditing:** Analyzes business websites to detect outdated CMS versions, missing mobile optimization, parked domains, or "social-only" businesses with no real website.
+* **Smart Lead Scoring:** Ranks prospects from 0-100 based on review count, rating, digital presence, and website quality so you can focus on the warmest leads.
+* **AI-Personalized Cold Emails:** Uses Google's Gemini AI to write highly personalized, honest outreach pitches based on the business's actual Google reviews and website status.
+* **Auto-CSV Export:** Automatically saves all extracted data and generated pitches to a CSV file on your server for easy import into your CRM.
+* **Beautiful Web Dashboard:** A sleek, dark-mode real-time UI built with FastAPI and WebSockets to monitor the pipeline as it hunts for leads.
 
-## Setup
+## 🛠️ Tech Stack
+- **Backend:** Python, FastAPI, LangGraph, SQLite
+- **Frontend:** Vanilla HTML/CSS/JS (WebSockets for real-time updates)
+- **AI Integrations:** Google Gemini (Flash-Lite), Google Places API (New)
+- **Deployment:** Docker, Docker Compose
+
+---
+
+## 📦 Setup & Installation
+
+GeoProspector AI is built for easy local usage or production deployment to a VPS.
+
+### Option 1: Run Locally
 
 ```bash
-cd maps-outreach-agent
+git clone https://github.com/your-username/geoprospector-ai.git
+cd geoprospector-ai
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Now edit `.env` yourself and fill in:
+Edit your `.env` file and add your `GOOGLE_PLACES_API_KEY` and `GEMINI_API_KEY`.
 
-- `GOOGLE_PLACES_API_KEY` — **don't paste this into a chat with any AI,
-  including this one.** Put it directly in your local `.env` file. Create
-  it in Google Cloud Console → APIs & Services → Credentials, and restrict
-  it (API restrictions → Places API only; and IP/application restrictions)
-  before you ever run this.
-- `GEMINI_API_KEY` — for business analysis + pitch writing, using Gemini's
-  free tier. Get a key with no credit card at https://aistudio.google.com
-  (this is separate from any Gemini Pro/Ultra app subscription — the
-  subscription doesn't grant API quota on its own). The default model,
-  `gemini-flash-lite-latest`, is one of the two model families Google
-  kept free after restricting Pro models to paid/subscription access in
-  April 2026; free-tier limits (roughly 15 requests/minute, 1,000/day) are
-  far more than this repo needs.
-- `SMTP_*` — for sending the actual emails (Gmail App Password works well
-  for testing; see comments in `.env.example`).
-- `HUNTER_API_KEY` — optional, only used as a third-tier fallback in email
-  discovery after website scraping and DuckDuckGo search.
-- `SENDER_NAME` — your name for the pitch sign-off. If blank, pitches sign
-  off with `[Your Name]`.
-- `MIN_LEAD_SCORE` — leads below this score (default 50) are auto-skipped.
-- `ENABLE_WEB_SEARCH` — toggle DuckDuckGo email/social discovery (default
-  true). Set to false if you only want website scraping + Hunter.io.
-
-## Running it locally
-
+Start the server:
 ```bash
 python app.py
 ```
-Then open `http://localhost:8000` in your browser.
+Open `http://localhost:8000` in your browser to access the dashboard.
 
-This will:
-1. Load the web dashboard (Sniper Mode).
-2. Allow you to search Places API for businesses.
-3. Automatically run every found business through the LangGraph pipeline in the background.
-4. Classify each business's web presence and skip businesses with good websites.
-5. Search for email addresses and social media profiles.
-6. Analyze and generate a highly personalized pitch for each prospect.
-7. Save everything to a local database.
+### Option 2: Deploy to VPS (Docker Compose + Caddy)
 
-You can then review the generated pitches in the dashboard, copy them to your clipboard, and manually send them via your own email client for perfect deliverability.
+The repository includes a production-ready `Dockerfile` running as a non-root user for security, and a `docker-compose.yml` configured to run behind a reverse proxy without exposing host ports.
 
-## Docker & Google Cloud (GCP) Deployment
-
-This app is fully Dockerized and ready to be deployed to GCP (e.g. Cloud Run or a Compute Engine VM).
-
-**1. Build the Docker Image**
+1. Clone the repository on your VPS.
+2. Configure your `.env` file.
+3. Run Docker Compose:
 ```bash
-docker build -t maps-outreach-agent .
+docker compose up -d --build
+```
+4. If using Caddy, add this block to your global Caddyfile:
+```caddyfile
+leads.yourdomain.com {
+    reverse_proxy maps-outreach-agent:8000
+}
 ```
 
-**2. Run locally with Docker**
-```bash
-docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data maps-outreach-agent
-```
-*(Note: We mount the `/app/data` volume so your SQLite databases persist between container restarts).*
+---
 
-**3. Deploying to GCP Cloud Run**
-Cloud Run is stateless. If you deploy there, your SQLite databases will be wiped every time the container spins down. To prevent this, you must mount a Cloud Storage FUSE volume or a Memorystore/Filestore volume to `/app/data`.
+## 🧠 How the LangGraph Pipeline Works
 
-1. Push your image to Artifact Registry:
-```bash
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/maps-outreach-agent
-```
-2. Deploy to Cloud Run (with volume mount):
-```bash
-gcloud run deploy maps-outreach-agent \
-  --image gcr.io/YOUR_PROJECT_ID/maps-outreach-agent \
-  --port 8000 \
-  --set-env-vars GOOGLE_PLACES_API_KEY="...",GEMINI_API_KEY="..." \
-  --execution-environment gen2 \
-  --add-volume name=data-vol,type=cloud-storage,bucket=YOUR_BUCKET_NAME \
-  --add-volume-mount volume=data-vol,mount-path=/app/data
-```
-*(Make sure your Cloud Run service account has Storage Object Admin permissions).*
+GeoProspector AI isn't just a scraper; it's an intelligent multi-agent pipeline. For every business found on Google Maps, the agent executes the following workflow:
 
-## Lead scoring rubric
+1. **Website Check:** Determines if the business has a modern website, an outdated website, or no website at all.
+2. **Contact Discovery:** Runs multi-stage enrichment to hunt down the business owner's email and social media links.
+3. **Lead Scoring:** Assigns a composite score. If the business already has a fantastic website, it skips generating a pitch but still extracts the data.
+4. **AI Pitch Generation:** If the lead is qualified, the agent generates a custom cold email referencing their specific Google reviews and website flaws (e.g., pitching a modernization vs. a brand-new build).
+5. **Database Storage:** Saves the business and the pitch to a local SQLite CRM database and auto-exports to a CSV file.
 
-| Signal | Points | Notes |
-|--------|--------|-------|
-| No website | +30 | Strongest signal of need |
-| Social-only "website" | +25 | Has online awareness but no real site |
-| Dead/outdated website | +20 | Still a good prospect |
-| Google reviews ≥ 500 | +20 | Established business |
-| Google reviews ≥ 100 | +15 | |
-| Google reviews ≥ 20 | +10 | |
-| Google rating ≥ 4.0 | +10 | Quality business |
-| Email found | +15 | We can actually contact them |
-| Phone listed | +5 | Reachable |
-| Has Facebook/Instagram | +10 | Online-aware |
-| High-value category | +10 | restaurant, hotel, salon, etc. |
+## 💰 API Costs & Free Tiers
 
-Maximum possible score: 100. Default minimum to qualify: 50.
+This tool is designed to cost **$0/month** to run:
+- **Google Places API:** You get 5,000 free search calls per month. (Note: A 100-business search costs only 5 API calls due to pagination).
+- **Gemini API:** Uses the Gemini free tier (1,500 requests/day).
+- **DuckDuckGo:** Free web search scraping.
 
-## Cost: this stack is $0/month
+## ⚠️ Compliance & Terms of Service
 
-- Places API: free within quota (see below).
-- Gemini Flash-Lite: free tier, well above what this repo needs.
-- DuckDuckGo search: free, no API key.
-- Gmail SMTP: free.
-- Hunter.io: free tier if you enable it (25 lookups/month).
+* **CAN-SPAM / GDPR:** If you decide to send cold emails to the leads generated by this tool, you must ensure you comply with CAN-SPAM laws (e.g., including an unsubscribe option and physical address) and GDPR regulations for B2B outreach in Europe.
+* **Google Maps ToS:** Be aware of the Google Maps API Terms of Service regarding the caching and long-term storage of business data. This tool is intended for personal lead generation and direct outreach, not for building public redistributable databases.
 
-If you later want sharper copywriting than a Flash-Lite model gives you,
-the pitch-generation node is the one place to swap in a paid model --
-`nodes/pitch_generator.py` is a self-contained file, and keeping
-`nodes/business_analyzer.py` on free Gemini while paying only for the
-final pitch draft keeps costs minimal even then.
-
-## Staying inside the free tier
-
-As of the SKU-based pricing Google introduced in March 2025, Places API
-(New) gives you **10,000 free calls/month for Essentials-tier fields**
-(what this repo uses), 5,000/month for Pro-tier fields (adds rating,
-website, etc.), separately. Since finding "no website" businesses
-requires the `websiteUri` field, this repo's search node uses the
-**Pro tier** for that reason — meaning your real free ceiling is
-**5,000 search calls/month**, not 10,000. Config defaults are set far
-below that (25 results per run) so you'd need ~200 runs in a month before
-paying anything. Double check current SKU pricing/limits in your own
-Cloud Console billing page — Google revises these periodically, and this
-README's numbers were true as of mid-2026.
-
-## What's stubbed / needs your judgment
-
-- **Email finding** uses DuckDuckGo as the primary web search engine. It's
-  free but rate-limited. If you need higher volume, swap in SerpAPI or
-  Google Custom Search API in `nodes/email_finder.py`.
-- **Compliance**: `nodes/email_sender.py` includes a CAN-SPAM footer
-  (physical address placeholder + unsubscribe line) that you must fill in
-  with your real business address before sending anything for real. If
-  you're contacting anyone in the EU/UK, read up on GDPR's rules for B2B
-  cold email before running this against real businesses.
-- **Google Places API Terms of Service**: re-read the current ToS before
-  storing scraped listing data long-term or using it for anything beyond
-  contacting businesses about your own services once. Building a
-  redistributable database of this data is against the terms.
-
-## Next steps (not built yet, on purpose)
-
-- Swap the "one business, one graph run" loop in `main.py` for a
-  `Send`-based fan-out once you're comfortable with how `interrupt()`
-  behaves in this codebase.
-- Add a `PostgresSaver`/`SqliteSaver` checkpointer so approval can happen
-  asynchronously (e.g., via a Slack bot) instead of blocking your
-  terminal.
-- Add a suppression-list check (people who've unsubscribed) to
-  `email_sender.py` before every send — required for CAN-SPAM compliance
-  in production use.
-- Build a React dashboard to visualize leads, scores, and outreach status
-  instead of the CLI.
+---
+*Built for local service web designers and B2B growth hackers.*
