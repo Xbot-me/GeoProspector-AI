@@ -1,0 +1,247 @@
+"""
+Tiny local CRM. One row per business, one lightweight table -- no ORM
+needed for a starter repo. Swap for Postgres/Airtable/whatever later.
+
+Also stores search run history so every query is browsable later.
+"""
+import sqlite3
+from contextlib import contextmanager
+
+from config import CRM_DB_PATH
+
+SCHEMA_BUSINESSES = """
+CREATE TABLE IF NOT EXISTS businesses (
+    place_id TEXT PRIMARY KEY,
+    name TEXT,
+    address TEXT,
+    phone TEXT,
+    category TEXT,
+    website TEXT,
+    email TEXT,
+    email_source TEXT,
+    rating REAL,
+    review_count INTEGER,
+    website_quality TEXT,
+    website_notes TEXT,
+    facebook_url TEXT,
+    instagram_url TEXT,
+    owner_name TEXT,
+    contact_sources TEXT,
+    lead_score INTEGER,
+    score_breakdown TEXT,
+    analysis TEXT,
+    pitch_subject TEXT,
+    pitch_body TEXT,
+    approval_status TEXT DEFAULT 'pending',
+    send_status TEXT DEFAULT 'not_sent',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SCHEMA_RUNS = """
+CREATE TABLE IF NOT EXISTS search_runs (
+    run_id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    location TEXT NOT NULL,
+    radius INTEGER,
+    max_results INTEGER,
+    result_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'running',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SCHEMA_RUN_BUSINESSES = """
+CREATE TABLE IF NOT EXISTS run_businesses (
+    run_id TEXT NOT NULL,
+    place_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, place_id),
+    FOREIGN KEY (run_id) REFERENCES search_runs(run_id),
+    FOREIGN KEY (place_id) REFERENCES businesses(place_id)
+);
+"""
+
+# Columns that may not exist in older databases.
+_MIGRATION_COLUMNS = [
+    ("rating", "REAL"),
+    ("review_count", "INTEGER"),
+    ("website_quality", "TEXT"),
+    ("website_notes", "TEXT"),
+    ("facebook_url", "TEXT"),
+    ("instagram_url", "TEXT"),
+    ("owner_name", "TEXT"),
+    ("contact_sources", "TEXT"),
+    ("lead_score", "INTEGER"),
+    ("score_breakdown", "TEXT"),
+    ("website", "TEXT"),
+]
+
+
+@contextmanager
+def get_conn():
+    conn = sqlite3.connect(CRM_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add new columns to an existing table without losing data."""
+    cursor = conn.execute("PRAGMA table_info(businesses)")
+    existing = {row[1] for row in cursor.fetchall()}
+    for col_name, col_type in _MIGRATION_COLUMNS:
+        if col_name not in existing:
+            conn.execute(
+                f"ALTER TABLE businesses ADD COLUMN {col_name} {col_type}"
+            )
+
+
+def init_db() -> None:
+    with get_conn() as conn:
+        conn.execute(SCHEMA_BUSINESSES)
+        conn.execute(SCHEMA_RUNS)
+        conn.execute(SCHEMA_RUN_BUSINESSES)
+        _migrate(conn)
+
+
+# ── Search runs ──────────────────────────────────────────────────────────
+
+def save_search_run(run_id: str, query: str, location: str,
+                    radius: int, max_results: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO search_runs "
+            "(run_id, query, location, radius, max_results) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, query, location, radius, max_results),
+        )
+
+
+def update_search_run(run_id: str, result_count: int, status: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE search_runs SET result_count = ?, status = ? "
+            "WHERE run_id = ?",
+            (result_count, status, run_id),
+        )
+
+
+def link_business_to_run(run_id: str, place_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO run_businesses (run_id, place_id) "
+            "VALUES (?, ?)",
+            (run_id, place_id),
+        )
+
+
+def get_all_runs() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM search_runs ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_businesses_for_run(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT b.* FROM businesses b "
+            "JOIN run_businesses rb ON b.place_id = rb.place_id "
+            "WHERE rb.run_id = ? "
+            "ORDER BY b.lead_score DESC, b.name ASC",
+            (run_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── Businesses ───────────────────────────────────────────────────────────
+
+_ALL_FIELDS = [
+    "place_id", "name", "address", "phone", "category", "website", "email",
+    "email_source", "rating", "review_count", "website_quality",
+    "website_notes", "facebook_url", "instagram_url", "owner_name",
+    "contact_sources", "lead_score", "score_breakdown", "analysis",
+    "pitch_subject", "pitch_body", "approval_status", "send_status",
+]
+
+
+def upsert_business(record: dict) -> None:
+    values = [record.get(f) for f in _ALL_FIELDS]
+    placeholders = ",".join("?" for _ in _ALL_FIELDS)
+    updates = ",".join(
+        f"{f}=excluded.{f}" for f in _ALL_FIELDS if f != "place_id"
+    )
+
+    with get_conn() as conn:
+        conn.execute(
+            f"""
+            INSERT INTO businesses ({",".join(_ALL_FIELDS)})
+            VALUES ({placeholders})
+            ON CONFLICT(place_id) DO UPDATE SET
+                {updates},
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            values,
+        )
+
+
+def get_business(place_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM businesses WHERE place_id = ?", (place_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def already_processed(place_id: str) -> bool:
+    """Avoid re-emailing the same business across repeated runs."""
+    biz = get_business(place_id)
+    return bool(biz and biz["send_status"] == "sent")
+
+
+def get_all_leads() -> list[dict]:
+    """Return all businesses, ordered by score then name."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM businesses "
+            "ORDER BY lead_score DESC, created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_run_stats() -> dict:
+    """Return aggregate counts for end-of-run summary."""
+    with get_conn() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM businesses"
+        ).fetchone()[0]
+        good_website = conn.execute(
+            "SELECT COUNT(*) FROM businesses WHERE website_quality = 'good'"
+        ).fetchone()[0]
+        low_score = conn.execute(
+            "SELECT COUNT(*) FROM businesses WHERE lead_score IS NOT NULL "
+            "AND lead_score < 50 AND website_quality != 'good'"
+        ).fetchone()[0]
+        emails_found = conn.execute(
+            "SELECT COUNT(*) FROM businesses WHERE email IS NOT NULL "
+            "AND email != ''"
+        ).fetchone()[0]
+        approved = conn.execute(
+            "SELECT COUNT(*) FROM businesses WHERE approval_status = 'approved'"
+        ).fetchone()[0]
+        sent = conn.execute(
+            "SELECT COUNT(*) FROM businesses WHERE send_status = 'sent'"
+        ).fetchone()[0]
+    return {
+        "total": total,
+        "good_website": good_website,
+        "low_score": low_score,
+        "emails_found": emails_found,
+        "approved": approved,
+        "sent": sent,
+    }

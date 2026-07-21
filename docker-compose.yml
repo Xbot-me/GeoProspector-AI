@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: maps-outreach-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - maps_outreach_data:/app/data
+    networks:
+      - securemonitor_default
+    # No ports exposed to host. Caddy will route to this container internally on port 8000.
+
+volumes:
+  maps_outreach_data:
+
+networks:
+  securemonitor_default:
+    external: true
