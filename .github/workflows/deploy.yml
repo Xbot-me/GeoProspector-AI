@@ -18,8 +18,7 @@ jobs:
           # The script that runs ON your VPS
           script: |
             # 1. Navigate to the project directory on your VPS
-            # (Make sure to change this to the actual folder path on your VPS!)
-            cd /path/to/your/project
+            cd ~/GeoProspector-AI
             
             # 2. Pull the latest code from GitHub
             git pull origin main
