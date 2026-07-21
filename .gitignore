@@ -1,0 +1,7 @@
+.env
+venv/
+__pycache__/
+*.pyc
+crm.sqlite3
+quota_state.json
+checkpoints.sqlite3
