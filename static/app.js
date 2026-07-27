@@ -17,32 +17,63 @@
   const searchBtn       = $('#searchBtn');
   const suggestBtn      = $('#suggestBtn');
   const autoPilotBtn    = $('#autoPilotBtn');
-  const exportBtn       = $('#exportBtn');
+  // ── Toast Notification Helper ──────────────────────────────
+  function showToast(msg, type = 'info', duration = 6000) {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toastContainer';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast toast--${type}`;
+    toast.innerHTML = `<span style="font-size:1.2rem;">${type==='success'?'✅':type==='error'?'⚠️':'ℹ️'}</span><div style="flex:1;">${msg.replace(/\n/g,'<br>')}</div>`;
+    toast.onclick = () => toast.remove();
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px) scale(0.95)';
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
 
   // ── Auto-Pilot Handler ─────────────────────────────────────
   if (autoPilotBtn) {
     autoPilotBtn.addEventListener('click', async () => {
-      if (!confirm('Run daily auto-pilot? This will auto-send emails in queue up to 20/day and search the next city in rotation.')) return;
-      
+      if (!window._confirmAutoPilot) {
+        window._confirmAutoPilot = true;
+        showToast("⚡ Click 'Run Daily Auto-Pilot' again within 5 seconds to confirm launching today's campaign (up to 20 emails).", "info", 6000);
+        autoPilotBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+        autoPilotBtn.innerHTML = '<span>⚠️</span> Click Again to Confirm Launch';
+        setTimeout(() => {
+          window._confirmAutoPilot = false;
+          autoPilotBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+          autoPilotBtn.innerHTML = '<span>⚡</span> Run Daily Auto-Pilot (20 Leads)';
+        }, 5000);
+        return;
+      }
+      window._confirmAutoPilot = false;
       autoPilotBtn.disabled = true;
-      const originalHtml = autoPilotBtn.innerHTML;
+      const originalHtml = '<span>⚡</span> Run Daily Auto-Pilot (20 Leads)';
       autoPilotBtn.innerHTML = '<span>⏳</span> Starting Auto-Pilot...';
+      showToast("⚡ Launching Daily Auto-Pilot sequence...", "info");
 
       try {
         const resp = await fetch('/api/campaign/run_daily', { method: 'POST' });
         const data = await resp.json();
         
         if (data.success) {
-          alert(`⚡ Auto-Pilot Started!\n\nDispatched from queue: ${data.dispatched_from_queue} emails\nToday's Total Sent: ${data.daily_sent_total}/20\n\nNext Rotation Target: ${data.target.display_name}`);
-          window.location.reload();
+          showToast(`⚡ Auto-Pilot Started!\nDispatched from queue: ${data.dispatched_from_queue} emails\nToday's Total Sent: ${data.daily_sent_total}/20\nNext Target: ${data.target.display_name}`, "success", 10000);
+          setTimeout(() => window.location.reload(), 3000);
         } else {
-          alert('Error: ' + (data.error || 'Failed to start auto-pilot'));
+          showToast('Error: ' + (data.error || 'Failed to start auto-pilot'), "error", 8000);
         }
       } catch (e) {
         console.error('Auto-Pilot error:', e);
-        alert('Network error starting auto-pilot.');
+        showToast('Network error starting auto-pilot.', "error");
       } finally {
         autoPilotBtn.disabled = false;
+        autoPilotBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
         autoPilotBtn.innerHTML = originalHtml;
       }
     });
@@ -452,16 +483,108 @@
         if (data.query && data.location) {
           $('#query').value = data.query;
           $('#location').value = data.location;
+          showToast(`💡 Suggested: ${data.query} in ${data.location}`, "info");
         } else if (data.error) {
           console.error('Suggest error:', data.error);
-          alert('Error: ' + data.error);
+          showToast('Error: ' + data.error, "error");
         }
       } catch (e) {
         console.error('Failed to fetch suggestion:', e);
+        showToast('Failed to fetch suggestion.', "error");
       } finally {
         suggestBtn.disabled = false;
         suggestBtn.innerHTML = originalText;
       }
+    });
+  }
+
+  // ── Logout Handler ─────────────────────────────────────────
+  const logoutBtn = $('#logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        showToast("🔒 Logged out successfully.", "info");
+        setTimeout(() => window.location.href = '/login', 500);
+      } catch (e) {
+        window.location.href = '/login';
+      }
+    });
+  }
+
+  // ── Email Dispatch & Tracking Logs Loader ──────────────────
+  const emailLogsContent = $('#emailLogsContent');
+  const refreshLogsBtn = $('#refreshLogsBtn');
+
+  async function loadEmailLogs() {
+    if (!emailLogsContent) return;
+    try {
+      const resp = await fetch('/api/email-logs');
+      if (!resp.ok) return;
+      const logs = await resp.json();
+
+      if (!logs || logs.length === 0) {
+        emailLogsContent.innerHTML = `
+          <div class="empty-state" style="padding: 24px 0;">
+            <div class="empty-state__icon" style="font-size: 1.8rem;">📭</div>
+            <div class="empty-state__text">No emails dispatched yet</div>
+          </div>`;
+        return;
+      }
+
+      let html = `
+        <div class="leads-table-wrap">
+          <table class="leads-table">
+            <thead>
+              <tr>
+                <th>Business Name</th>
+                <th>Recipient Email</th>
+                <th>Status</th>
+                <th>Sent / Dispatched At</th>
+                <th>Opens / Tracking</th>
+                <th>Error Message</th>
+              </tr>
+            </thead>
+            <tbody>`;
+
+      logs.forEach(l => {
+        const statusBadge = l.send_status === 'sent' 
+          ? `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 8px; border-radius:4px; font-weight:600;">Sent</span>`
+          : `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:4px; font-weight:600;">Failed</span>`;
+        
+        const openBadge = l.open_count > 0 
+          ? `<span style="background:rgba(6,182,212,0.15); color:#06b6d4; padding:2px 8px; border-radius:4px; font-weight:600;">👀 Opened (${l.open_count}x)</span>`
+          : `<span style="color:var(--text-muted);">Unopened</span>`;
+
+        const timeStr = l.sent_at ? new Date(l.sent_at).toLocaleString() : 'N/A';
+        const errStr = l.error_message ? `<span style="color:#ef4444; font-size:0.75rem;">${l.error_message}</span>` : '—';
+
+        html += `
+          <tr>
+            <td class="leads-table__name">${l.name || 'Unknown'}</td>
+            <td class="leads-table__email">${l.email || '—'}</td>
+            <td>${statusBadge}</td>
+            <td style="font-size:0.8rem; color:var(--text-muted);">${timeStr}</td>
+            <td>${openBadge}</td>
+            <td>${errStr}</td>
+          </tr>`;
+      });
+
+      html += `
+            </tbody>
+          </table>
+        </div>`;
+
+      emailLogsContent.innerHTML = html;
+    } catch (e) {
+      console.error('Error loading email logs:', e);
+    }
+  }
+
+  if (refreshLogsBtn) {
+    refreshLogsBtn.addEventListener('click', () => {
+      showToast("🔄 Refreshing email logs...", "info", 2000);
+      loadEmailLogs();
     });
   }
 
@@ -487,7 +610,12 @@
     eventFeed.innerHTML = '';
 
     // Reset stats
-    updateStats({ found: 0, qualified: 0, emails_found: 0, approved: 0, sent: 0, good_website: 0, low_score: 0 });
+    $('#statFound').textContent = '0';
+    $('#statQualified').textContent = '0';
+    $('#statEmails').textContent = '0';
+    $('#statApproved').textContent = '0';
+    $('#statSent').textContent = '0';
+    $('#statSkipped').textContent = '0';
 
     try {
       const resp = await fetch('/api/search', {
@@ -522,7 +650,9 @@
     if (e.key === 'Escape') closeModal();
   });
 
-  // ── Init: load existing leads ──────────────────────────────
+  // ── Init: load existing leads & logs ───────────────────────
   loadLeads();
+  loadEmailLogs();
+  setInterval(loadEmailLogs, 30000);
 
 })();

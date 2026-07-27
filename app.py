@@ -22,14 +22,14 @@ from pathlib import Path
 from threading import Thread
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import (
     get_all_leads, get_all_runs, get_business, get_businesses_for_run,
     init_db, link_business_to_run, save_search_run, update_search_run,
     upsert_business, record_email_open, get_pending_auto_send_leads,
-    get_daily_sent_count,
+    get_daily_sent_count, get_email_logs,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target
@@ -50,6 +50,9 @@ _runs: dict[str, dict] = {}
 # Maps run_id -> list of WebSocket connections listening to it
 _ws_clients: dict[str, list[WebSocket]] = {}
 
+# Maps session token -> username for modern HTML login page
+_sessions: dict[str, str] = {}
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -63,25 +66,37 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Maps Outreach Agent", lifespan=lifespan)
 
 
+# ── Authentication Middleware ───────────────────────────────────────────
+
 @app.middleware("http")
 async def basic_auth_middleware(request: Request, call_next):
     path = request.url.path
-    # Allow public endpoints and public static assets without authentication
+    # Allow public endpoints and login assets without authentication
     if (
-        path in ("/history", "/runs", "/public") or
+        path in ("/history", "/runs", "/public", "/login") or
         path.startswith("/api/runs") or
         path.startswith("/api/track/") or
-        path in ("/static/history.html", "/static/history.js", "/static/style.css", "/favicon.ico")
+        path.startswith("/api/auth/") or
+        path in ("/static/history.html", "/static/history.js", "/static/login.html", "/static/style.css", "/favicon.ico")
     ):
         return await call_next(request)
 
+    # 1. Check Cookie Session Token first (Modern HTML login)
+    session_token = request.cookies.get("admin_session")
+    if session_token and session_token in _sessions:
+        return await call_next(request)
+
+    # 2. Fallback to HTTP Basic Auth (API scripts / cron jobs)
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Basic "):
-        return Response(
-            status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
-            content="Unauthorized: Admin credentials required.",
-        )
+        if path.startswith("/api/"):
+            return Response(
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
+                content="Unauthorized: Admin credentials required.",
+            )
+        # Redirect browser navigation to modern login page
+        return RedirectResponse(url="/login", status_code=303)
 
     try:
         encoded_creds = auth_header.split(" ", 1)[1]
@@ -113,11 +128,45 @@ async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/login")
+async def login_page():
+    return FileResponse(str(STATIC_DIR / "login.html"))
+
+
 @app.get("/history")
 @app.get("/runs")
 @app.get("/public")
 async def history_page():
     return FileResponse(str(STATIC_DIR / "history.html"))
+
+
+# ── Auth & Log Endpoints ─────────────────────────────────────────────────
+
+@app.post("/api/auth/login")
+async def login_endpoint(payload: dict, response: Response):
+    username = payload.get("username", "")
+    password = payload.get("password", "")
+    if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+        token = secrets.token_urlsafe(32)
+        _sessions[token] = username
+        response.set_cookie(key="admin_session", value=token, httponly=True, max_age=86400 * 7, samesite="lax")
+        return {"success": True}
+    return Response(status_code=401, content="Invalid username or password.")
+
+
+@app.post("/api/auth/logout")
+async def logout_endpoint(request: Request, response: Response):
+    token = request.cookies.get("admin_session")
+    if token and token in _sessions:
+        del _sessions[token]
+    response.delete_cookie("admin_session")
+    return {"success": True}
+
+
+@app.get("/api/email-logs")
+async def list_email_logs():
+    """Return recent email send logs and tracking statuses."""
+    return get_email_logs(limit=100)
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────
@@ -384,20 +433,24 @@ async def update_lead_status(place_id: str, payload: dict):
 
 @app.websocket("/ws/{run_id}")
 async def websocket_endpoint(websocket: WebSocket, run_id: str):
-    auth_header = websocket.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Basic "):
-        await websocket.close(code=4001, reason="Unauthorized")
-        return
-    try:
-        encoded_creds = auth_header.split(" ", 1)[1]
-        decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
-        username, _, password = decoded_creds.partition(":")
-        if not (secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)):
-            await websocket.close(code=4001, reason="Invalid credentials")
+    # Check cookie session first
+    session_token = websocket.cookies.get("admin_session")
+    if not (session_token and session_token in _sessions):
+        # Fallback to HTTP Basic Auth
+        auth_header = websocket.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Basic "):
+            await websocket.close(code=4001, reason="Unauthorized")
             return
-    except Exception:
-        await websocket.close(code=4001, reason="Invalid auth")
-        return
+        try:
+            encoded_creds = auth_header.split(" ", 1)[1]
+            decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
+            username, _, password = decoded_creds.partition(":")
+            if not (secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)):
+                await websocket.close(code=4001, reason="Invalid credentials")
+                return
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid auth")
+            return
 
     await websocket.accept()
     _ws_clients.setdefault(run_id, []).append(websocket)
