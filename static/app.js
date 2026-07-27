@@ -576,15 +576,65 @@
         </div>`;
 
       emailLogsContent.innerHTML = html;
+      loadSchedulerStatus();
     } catch (e) {
       console.error('Error loading email logs:', e);
     }
+  }
+
+  async function loadSchedulerStatus() {
+    try {
+      const resp = await fetch('/api/scheduler/status');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const countEl = $('#schedCount');
+      const timeEl = $('#schedNextTime');
+      const sentEl = $('#schedSentToday');
+      if (countEl) countEl.textContent = data.scheduled_count;
+      if (timeEl) timeEl.textContent = data.next_send_time;
+      if (sentEl) sentEl.textContent = data.daily_sent_total;
+    } catch (e) {}
   }
 
   if (refreshLogsBtn) {
     refreshLogsBtn.addEventListener('click', () => {
       showToast("🔄 Refreshing email logs...", "info", 2000);
       loadEmailLogs();
+    });
+  }
+
+  const clearLogsBtn = $('#clearLogsBtn');
+  if (clearLogsBtn) {
+    let clearConfirm = false;
+    let clearTimer = null;
+    clearLogsBtn.addEventListener('click', async () => {
+      if (!clearConfirm) {
+        clearConfirm = true;
+        clearLogsBtn.textContent = '⚠️ Click again to confirm clear';
+        clearLogsBtn.style.background = '#ef4444';
+        clearLogsBtn.style.color = '#fff';
+        clearTimer = setTimeout(() => {
+          clearConfirm = false;
+          clearLogsBtn.textContent = '🗑️ Clear Logs';
+          clearLogsBtn.style.background = 'rgba(239, 68, 68, 0.15)';
+          clearLogsBtn.style.color = '#ef4444';
+        }, 4000);
+        return;
+      }
+      clearTimeout(clearTimer);
+      clearConfirm = false;
+      clearLogsBtn.textContent = '🗑️ Clear Logs';
+      clearLogsBtn.style.background = 'rgba(239, 68, 68, 0.15)';
+      clearLogsBtn.style.color = '#ef4444';
+      
+      try {
+        const resp = await fetch('/api/email-logs/clear', { method: 'POST' });
+        const data = await resp.json();
+        showToast(`🗑️ Cleared ${data.cleared_count || 0} log entries.`, "info");
+        loadEmailLogs();
+      } catch (e) {
+        showToast("Error clearing logs.", "error");
+      }
     });
   }
 

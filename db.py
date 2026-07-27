@@ -335,3 +335,15 @@ def get_email_logs(limit: int = 50) -> list[dict]:
         ).fetchall()
         return [dict(r) for r in rows]
 
+
+def clear_email_logs() -> int:
+    """Clear email logs by resetting send_status to 'not_sent', error_message, sent_at, and open_count for sent/failed emails."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "UPDATE businesses "
+            "SET send_status = 'not_sent', sent_at = NULL, error_message = NULL, open_count = 0, opened_at = NULL "
+            "WHERE send_status IN ('sent', 'failed') OR open_count > 0"
+        )
+        return cursor.rowcount
+
+
