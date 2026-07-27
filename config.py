@@ -42,7 +42,7 @@ Full-Stack Web Developer
 
 https://www.mustafizur.info
 https://www.fiverr.com/users/mustafizur_dev/portfolio
-mustafizur.dev101@gmail.com
+hello@mustafizur.info
 +8801886769509"""
 
 MAX_PLACES_RESULTS_PER_RUN = _int("MAX_PLACES_RESULTS_PER_RUN", 25)
