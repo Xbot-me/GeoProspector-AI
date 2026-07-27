@@ -38,35 +38,77 @@ def _clean_body_text(body_text: str) -> str:
     return f"{body_text.strip()}\n\n{SENDER_SIGNATURE}"
 
 
+def _build_signature_html() -> str:
+    """Build modern Executive Digital Business Card signature."""
+    return """<div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #f1f5f9;">
+    <div style="border-left: 3px solid #2563eb; padding-left: 16px;">
+        <div style="font-weight: 700; font-size: 16px; color: #0f172a; letter-spacing: -0.01em;">Mustafizur Rahman</div>
+        <div style="font-size: 13px; color: #64748b; font-weight: 500; margin-top: 2px; margin-bottom: 12px;">Full-Stack Web Developer</div>
+        
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="font-size: 13px; color: #475569; line-height: 1.8;">
+            <tr>
+                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">🌐</td>
+                <td><a href="https://www.mustafizur.info" style="color: #2563eb; text-decoration: none; font-weight: 500;">mustafizur.info</a></td>
+            </tr>
+            <tr>
+                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">💼</td>
+                <td><a href="https://www.fiverr.com/users/mustafizur_dev/portfolio" style="color: #2563eb; text-decoration: none; font-weight: 500;">View Selected Portfolio</a></td>
+            </tr>
+            <tr>
+                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">✉️</td>
+                <td><a href="mailto:mustafizur.dev101@gmail.com" style="color: #2563eb; text-decoration: none;">mustafizur.dev101@gmail.com</a></td>
+            </tr>
+            <tr>
+                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">📱</td>
+                <td><a href="tel:+8801886769509" style="color: #475569; text-decoration: none;">+880 1886-769509</a></td>
+            </tr>
+        </table>
+    </div>
+</div>"""
+
+
 def _build_canspam_footer(place_id: str) -> str:
     """Build the CAN-SPAM compliant footer HTML block."""
     unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
     address = SENDER_PHYSICAL_ADDRESS or "Dhaka, Bangladesh"
     return f"""
-    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 11px; color: #999999; line-height: 1.5;">
+    <div style="margin-top: 36px; padding-top: 20px; border-top: 1px solid #f1f5f9; font-size: 11px; color: #94a3b8; line-height: 1.6;">
         <p style="margin: 0 0 4px 0;">{address}</p>
         <p style="margin: 0;">
-            Not interested? <a href="{unsub_url}" style="color: #999999; text-decoration: underline;">Unsubscribe</a> and you won't hear from me again.
+            Not interested in website upgrades? <a href="{unsub_url}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe here</a> to opt out.
         </p>
     </div>"""
 
 
 def format_html_email(body_text: str, place_id: str) -> str:
-    """Wrap plain text in clean professional HTML with open tracking pixel and CAN-SPAM footer."""
-    # Convert line breaks to paragraphs and breaks
-    paragraphs = body_text.strip().split("\n\n")
+    """Wrap plain text in an executive responsive HTML card with business signature, CAN-SPAM footer, and tracking pixel."""
+    import re
+    # Separate signature if present at the end of body_text to render as styled card
+    if "Mustafizur Rahman" in body_text:
+        main_copy = body_text.split("Mustafizur Rahman")[0].strip()
+    else:
+        main_copy = body_text.strip()
+
+    paragraphs = main_copy.split("\n\n")
     formatted_p = []
     for p in paragraphs:
         p_br = p.replace("\n", "<br>")
-        formatted_p.append(f"<p style='margin-bottom: 16px; line-height: 1.6;'>{p_br}</p>")
+        # Auto-link standalone URLs
+        p_br = re.sub(
+            r'(https?://[^\s<]+)',
+            r'<a href="\1" style="color: #2563eb; font-weight: 500; text-decoration: none;">\1</a>',
+            p_br
+        )
+        formatted_p.append(f"<p style='margin: 0 0 16px 0; line-height: 1.65; color: #334155;'>{p_br}</p>")
     html_paragraphs = "".join(formatted_p)
+
+    signature_html = _build_signature_html()
+    canspam_footer = _build_canspam_footer(place_id)
 
     tracking_pixel = (
         f"<img src='{TRACKING_BASE_URL}/api/track/open/{place_id}.png' "
         "width='1' height='1' alt='' style='display:none; border:0;' />"
     )
-
-    canspam_footer = _build_canspam_footer(place_id)
 
     return f"""<!DOCTYPE html>
 <html>
@@ -74,12 +116,19 @@ def format_html_email(body_text: str, place_id: str) -> str:
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #222222; margin: 0; padding: 20px;">
-    <div style="max-width: 580px; margin: 0 auto;">
-        {html_paragraphs}
-        {canspam_footer}
-        {tracking_pixel}
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #334155; background-color: #f8fafc; margin: 0; padding: 32px 16px;">
+    <div style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);">
+        <!-- Top Accent Gradient Bar -->
+        <div style="height: 4px; background: linear-gradient(90deg, #2563eb 0%, #06b6d4 100%); font-size: 0; line-height: 0;">&nbsp;</div>
+        
+        <!-- Inner Padding Container -->
+        <div style="padding: 32px 28px;">
+            {html_paragraphs}
+            {signature_html}
+            {canspam_footer}
+        </div>
     </div>
+    {tracking_pixel}
 </body>
 </html>"""
 
