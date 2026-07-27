@@ -14,7 +14,7 @@ Critical rules baked into the prompt:
 """
 from google import genai
 
-from config import GEMINI_API_KEY, GEMINI_MODEL, SENDER_NAME
+from config import GEMINI_API_KEY, GEMINI_MODEL, SENDER_NAME, SENDER_SIGNATURE
 from state import BusinessState
 
 _client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -27,13 +27,24 @@ def _get_pitch_angle(state: BusinessState) -> str:
     return "no_website"
 
 
+def _append_signature(body: str) -> str:
+    """Ensure the email body always ends with the exact sender signature."""
+    if "mustafizur.info" in body:
+        return body
+    
+    for placeholder in ("[Your Name]", "[Your name]", "[your name]", "[YOUR NAME]", "Mustafizur Rahman"):
+        if placeholder in body:
+            return body.replace(placeholder, SENDER_SIGNATURE).strip()
+
+    return f"{body.strip()}\n\n{SENDER_SIGNATURE}"
+
+
 def generate_pitch(state: BusinessState) -> dict:
     if _client is None:
         raise RuntimeError("GEMINI_API_KEY is not set. Add it to your local .env file.")
 
     angle = _get_pitch_angle(state)
     owner = state.get("owner_name")
-    sign_off = SENDER_NAME or "[Your Name]"
 
     # Build personalization context
     personalization = []
@@ -93,7 +104,7 @@ CRITICAL RULES — you MUST follow these:
 3. Do NOT use robotic clichés like "I hope this email finds you well" or "In today's fast-paced digital landscape".
 4. Keep the email copy under 135 words. Short, punchy, and conversational.
 5. No em dashes, no exclamation-point enthusiasm.
-6. Sign off as: {sign_off}
+6. Do NOT include a sign-off or signature at the end of the email (we will append our signature programmatically). Just end with your call to action question.
 
 Output in EXACTLY this format, nothing else:
 LANGUAGE: <Primary local language name, e.g. English, Spanish, German>
@@ -122,4 +133,5 @@ BODY:
         subject = subject_part.replace("SUBJECT:", "").strip()
         body = body_part.strip()
 
+    body = _append_signature(body)
     return {"pitch_subject": subject, "pitch_body": body, "email_language": language}
