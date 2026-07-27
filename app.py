@@ -32,7 +32,7 @@ from db import (
     get_all_leads, get_all_runs, get_business, get_businesses_for_run,
     init_db, link_business_to_run, save_search_run, update_search_run,
     upsert_business, record_email_open, get_pending_auto_send_leads,
-    get_daily_sent_count, get_email_logs, clear_email_logs,
+    get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target
@@ -583,7 +583,13 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
     run = _runs[run_id]
 
     # Step 1: Search Places API
-    _broadcast(run_id, {"type": "status", "message": "Searching Google Maps..."})
+    _broadcast(run_id, {
+        "type": "search_start",
+        "query": query,
+        "location": location,
+        "message": f"🎯 LAUNCHED CAMPAIGN: {query.upper()} in {location.upper()}"
+    })
+    _broadcast(run_id, {"type": "status", "message": f"Searching Google Maps for {query} in {location}..."})
 
     try:
         businesses = search_businesses(
@@ -600,6 +606,20 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
         run["status"] = "error"
         update_search_run(run_id, 0, "error")
         return
+
+    # Filter out 100% solid duplicate businesses before processing
+    new_businesses = []
+    for b in businesses:
+        if is_business_already_processed(b["place_id"], b.get("name", "")):
+            _broadcast(run_id, {
+                "type": "skipped",
+                "name": b.get("name", "Unknown"),
+                "reason": "duplicate",
+                "message": f"Skipping duplicate: {b.get('name')} (already processed in CRM)"
+            })
+        else:
+            new_businesses.append(b)
+    businesses = new_businesses
 
     run["stats"]["found"] = len(businesses)
     update_search_run(run_id, len(businesses), "running")
@@ -656,11 +676,13 @@ def _process_single_business(run_id: str, graph_app, business: dict,
     run = _runs[run_id]
     place_id = business["place_id"]
     name = business["name"]
+    address = business.get("address", "")
 
     _broadcast(run_id, {
         "type": "processing",
         "place_id": place_id,
         "name": name,
+        "address": address,
         "index": index,
         "total": total,
         "step": "check_website",
@@ -697,6 +719,17 @@ def _process_single_business(run_id: str, graph_app, business: dict,
 
     run["stats"]["qualified"] += 1
     if result.get("email"):
+        if is_business_already_processed("", "", result["email"]):
+            logger.info(f"Skipping {name} — duplicate email {result['email']} already processed.")
+            result["send_status"] = "skipped_duplicate"
+            upsert_business(result)
+            _broadcast(run_id, {
+                "type": "skipped",
+                "name": name,
+                "reason": "duplicate_email",
+                "message": f"Skipping duplicate email: {result['email']} (already contacted)"
+            })
+            return
         run["stats"]["emails_found"] += 1
 
     # In sniper mode, the pipeline finishes on its own. It doesn't pause.
