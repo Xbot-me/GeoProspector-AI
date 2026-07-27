@@ -36,7 +36,14 @@ HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 # Lead enrichment & scoring
 ENABLE_WEB_SEARCH = _bool("ENABLE_WEB_SEARCH", True)
 MIN_LEAD_SCORE = _int("MIN_LEAD_SCORE", 0)
-SENDER_NAME = os.getenv("SENDER_NAME", "")
+SENDER_NAME = os.getenv("SENDER_NAME", "") or "Mustafizur Rahman"
+SENDER_SIGNATURE = """Mustafizur Rahman
+Full-Stack Web Developer
+
+https://www.mustafizur.info
+https://www.fiverr.com/users/mustafizur_dev/portfolio
+mustafizur.dev101@gmail.com
++8801886769509"""
 
 MAX_PLACES_RESULTS_PER_RUN = _int("MAX_PLACES_RESULTS_PER_RUN", 25)
 MAX_PLACES_CALLS_PER_MONTH = _int("MAX_PLACES_CALLS_PER_MONTH", 4000)

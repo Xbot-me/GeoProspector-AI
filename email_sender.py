@@ -16,10 +16,23 @@ from config import (
     SMTP_PORT,
     SMTP_USER,
     SMTP_PASS,
+    SENDER_SIGNATURE,
 )
 from db import record_email_sent
 
 TRACKING_BASE_URL = "https://b2b.mustafizur.info"
+
+
+def _clean_body_text(body_text: str) -> str:
+    """Safety guarantee: ensure existing db leads or manual sends have the full signature."""
+    if "mustafizur.info" in body_text:
+        return body_text
+    for placeholder in ("[Your Name]", "[Your name]", "[your name]", "[YOUR NAME]"):
+        if placeholder in body_text:
+            return body_text.replace(placeholder, SENDER_SIGNATURE).strip()
+    if "Mustafizur Rahman" in body_text:
+        return body_text.replace("Mustafizur Rahman", SENDER_SIGNATURE).strip()
+    return f"{body_text.strip()}\n\n{SENDER_SIGNATURE}"
 
 
 def format_html_email(body_text: str, place_id: str) -> str:
@@ -62,6 +75,7 @@ def send_email(place_id: str, to_email: str, subject: str, body_text: str) -> tu
         record_email_sent(place_id, status="failed", error=err)
         return False, err
 
+    body_text = _clean_body_text(body_text)
     html_body = format_html_email(body_text, place_id)
 
     # 1. Resend API
