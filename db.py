@@ -347,3 +347,37 @@ def clear_email_logs() -> int:
         return cursor.rowcount
 
 
+def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
+    """Check if a business has already been processed or contacted (100% solid deduplication)."""
+    with get_conn() as conn:
+        # 1. Check by place_id
+        if place_id:
+            row = conn.execute(
+                "SELECT send_status, approval_status, lead_score FROM businesses WHERE place_id = %s",
+                (place_id,),
+            ).fetchone()
+            if row and (
+                row["send_status"] in ("sent", "pending_auto_send", "queued")
+                or row["approval_status"] in ("approved", "rejected")
+                or row["lead_score"] is not None
+            ):
+                return True
+        # 2. Check by exact name if already queued or emailed
+        if name and name.strip():
+            row = conn.execute(
+                "SELECT send_status FROM businesses WHERE LOWER(name) = LOWER(%s) AND (send_status IN ('sent', 'pending_auto_send', 'queued') OR lead_score IS NOT NULL)",
+                (name.strip(),),
+            ).fetchone()
+            if row:
+                return True
+        # 3. Check by email if present
+        if email and "@" in email:
+            row = conn.execute(
+                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) AND send_status IN ('sent', 'pending_auto_send', 'queued')",
+                (email.strip(),),
+            ).fetchone()
+            if row:
+                return True
+    return False
+
+

@@ -401,6 +401,12 @@
         progressStatus.textContent = event.message;
         break;
 
+      case 'search_start':
+        progressStatus.textContent = event.message;
+        addEvent('done', '🚀', `CAMPAIGN STARTED: ${event.query} in ${event.location}`,
+          `<b style="color:var(--accent); font-size:1.05rem;">📍 Target: ${event.query.toUpperCase()} — 🏙️ City: ${event.location.toUpperCase()}</b>`);
+        break;
+
       case 'search_complete':
         updateStats({ found: event.count, qualified: 0, emails_found: 0, approved: 0, sent: 0 });
         progressStatus.textContent = `Found ${event.count} businesses. Processing...`;
@@ -411,15 +417,18 @@
       case 'processing':
         progressBar.style.width = `${(event.index / event.total) * 100}%`;
         progressStatus.textContent = `Processing ${event.index}/${event.total}: ${event.name}`;
-        addEvent('processing', '⏳', event.name,
-          `Enriching... (${event.index}/${event.total})`);
+        addEvent('processing', '⏳', `<b style="color:#fff;">${event.name}</b>`,
+          `📍 ${event.address || 'Checking details'} — Enriching... (${event.index}/${event.total})`);
         break;
 
       case 'skipped': {
-        const reason = event.reason === 'good_website'
-          ? `Good website — not a prospect`
-          : `Score ${event.lead_score} below threshold`;
-        addEvent('skipped', '⏭', event.name, reason);
+        let reason = event.message || '';
+        if (!reason) {
+          reason = event.reason === 'good_website'
+            ? `Good website — not a prospect`
+            : `Score ${event.lead_score} below threshold`;
+        }
+        addEvent('skipped', '⏭', event.name, `<span style="color:#f59e0b;">${reason}</span>`);
         // Refresh table
         loadLeads();
         break;
