@@ -16,7 +16,37 @@
   const searchForm      = $('#searchForm');
   const searchBtn       = $('#searchBtn');
   const suggestBtn      = $('#suggestBtn');
+  const autoPilotBtn    = $('#autoPilotBtn');
   const exportBtn       = $('#exportBtn');
+
+  // ── Auto-Pilot Handler ─────────────────────────────────────
+  if (autoPilotBtn) {
+    autoPilotBtn.addEventListener('click', async () => {
+      if (!confirm('Run daily auto-pilot? This will auto-send emails in queue up to 20/day and search the next city in rotation.')) return;
+      
+      autoPilotBtn.disabled = true;
+      const originalHtml = autoPilotBtn.innerHTML;
+      autoPilotBtn.innerHTML = '<span>⏳</span> Starting Auto-Pilot...';
+
+      try {
+        const resp = await fetch('/api/campaign/run_daily', { method: 'POST' });
+        const data = await resp.json();
+        
+        if (data.success) {
+          alert(`⚡ Auto-Pilot Started!\n\nDispatched from queue: ${data.dispatched_from_queue} emails\nToday's Total Sent: ${data.daily_sent_total}/20\n\nNext Rotation Target: ${data.target.display_name}`);
+          window.location.reload();
+        } else {
+          alert('Error: ' + (data.error || 'Failed to start auto-pilot'));
+        }
+      } catch (e) {
+        console.error('Auto-Pilot error:', e);
+        alert('Network error starting auto-pilot.');
+      } finally {
+        autoPilotBtn.disabled = false;
+        autoPilotBtn.innerHTML = originalHtml;
+      }
+    });
+  }
   const progressSection = $('#progressSection');
   const progressBar     = $('#progressBar');
   const progressStatus  = $('#progressStatus');
@@ -65,11 +95,13 @@
       pending: 'pending', approved: 'approved', sent: 'sent',
       rejected: 'rejected', skipped: 'skipped',
       not_sent: 'pending', no_email: 'skipped', failed: 'rejected',
+      pending_auto_send: 'approved',
     };
     const labels = {
       pending: '⏳ Pending', approved: '✓ Approved', sent: '✉ Contacted',
       rejected: '✕ Rejected', skipped: '⏭ Skipped',
       not_sent: '⏳ Pending', no_email: '⏭ No Email', failed: '✕ Failed',
+      pending_auto_send: '⚡ Auto-Queue',
     };
     const cls = map[status] || 'pending';
     const label = labels[status] || status;
@@ -161,7 +193,7 @@
         <td>${qualityBadge(l.website_quality)}</td>
         <td class="leads-table__email">${l.email ? esc(l.email) : '<span style="color:var(--text-muted)">—</span>'}</td>
         <td>${l.facebook_url ? '📘' : ''}${l.instagram_url ? ' 📷' : ''}</td>
-        <td>${statusBadge(l.send_status === 'sent' ? 'sent' : l.approval_status)}</td>
+        <td>${l.open_count > 0 ? `<span class="status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">👀 Opened (${l.open_count})</span>` : statusBadge(l.send_status === 'sent' ? 'sent' : (l.send_status === 'pending_auto_send' ? 'pending_auto_send' : l.approval_status))}</td>
         <td>
           ${showReview
             ? `<button class="btn btn--primary btn--sm" onclick="window.__openModal('${esc(l.place_id)}')">Review</button>`
@@ -223,6 +255,8 @@
       ['Score', scoreBadge(data.lead_score)],
       ['Website', qualityBadge(data.website_quality)],
       ['Email', data.email ? `<span class="leads-table__email">${esc(data.email)}</span>` : '<span style="color:var(--text-muted)">Not found</span>'],
+      ['Language', data.email_language ? `<span style="color:#10b981;font-weight:600;">🗣️ ${esc(data.email_language)}</span>` : 'English'],
+      ['Tracking', data.open_count > 0 ? `<span style="color:#10b981;font-weight:600;">👀 Opened ${data.open_count} time(s)</span>` : (data.sent_at ? `✉ Sent at ${data.sent_at}` : 'Not dispatched yet')],
       ['Phone', data.phone || '—'],
       ['Rating', data.rating ? `${data.rating}★ (${data.review_count || 0} reviews)` : '—'],
       ['Category', data.category || '—'],

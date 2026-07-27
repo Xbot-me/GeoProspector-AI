@@ -57,21 +57,20 @@ def generate_pitch(state: BusinessState) -> dict:
 
     if angle == "outdated":
         situation = (
-            "This business HAS a website but it's outdated. "
-            f"Issues found: {state.get('website_notes', 'various red flags')}. "
-            "Pitch modernizing/rebuilding their site, NOT creating one from scratch."
+            "This business HAS a website but it has flaws or looks outdated. "
+            f"Specific issues found: {state.get('website_notes', 'various technical/UX red flags')}. "
+            "Pitch modernizing or fixing their site, NOT creating one from scratch."
         )
     else:
         situation = (
-            "This business has NO website (or only a social media page). "
-            "Pitch creating a professional website for them."
+            "This business has NO website (or relies solely on social media like Facebook/Instagram). "
+            "Pitch building a clean, modern, dedicated website for them so customers can easily find them on Google."
         )
 
-    prompt = f"""Write a short cold outreach email pitching web development
-services to this business.
+    prompt = f"""You are an elite, human cold-email copywriter and native linguist. Write a short, highly compelling cold outreach email pitching web development services to this business.
 
 Business name: {state.get('name')}
-Category: {state.get('category') or 'unknown'}
+Category: {state.get('category') or 'local service business'}
 Location: {state.get('address')}
 
 Situation: {situation}
@@ -82,33 +81,45 @@ Analysis notes to draw from:
 Personalization data:
 {personalization_block}
 
-CRITICAL RULES — you MUST follow these:
-1. Do NOT claim to have helped other businesses. Do NOT say "I have helped
-   local businesses like yours" or anything similar.
-2. Do NOT fabricate experience, portfolio links, or client names.
-3. Do NOT use "I hope this email finds you well" or similar clichés.
-4. Write from the perspective of someone offering to help, NOT someone
-   with a proven track record. Be honest and straightforward.
-5. Under 130 words.
-6. Reference one specific, plausible detail about the business from the
-   analysis notes — not generic flattery.
-7. One clear call to action: a short reply or a 10-minute call. Not a
-   hard sell.
-8. No em dashes, no exclamation-point enthusiasm.
-9. Sign off as: {sign_off}
+COPYWRITING FRAMEWORK — "Value-First Mockup Offer":
+1. Compliment Hook: Start by acknowledging their hard-earned reputation (e.g., mention their Google rating/reviews or local standing as THEIR achievement).
+2. Friction Point: Explain specifically WHY their website state (e.g., HTTP error, outdated design, slow mobile load, or lack of a real website) is causing potential local customers or smartphone users to bounce or call competitors.
+3. Zero-Risk Offer: Offer to put together a free visual 3-page mockup or homepage design concept for them at ZERO cost or commitment before they ever pay a dime.
+4. Call to Action (CTA): End with a simple, low-friction question asking if they'd be open to seeing a quick preview or 2-minute video mockup.
 
-Output in exactly this format, nothing else:
-SUBJECT: <subject line>
+CRITICAL RULES — you MUST follow these:
+1. LANGUAGE DETECTION & TRANSLATION: Analyze the Location ({state.get('address')}) and Business name. Determine the primary local language spoken by business owners in this city/country (e.g., Spanish for Spain/Mexico, German for Germany/Austria, French for France/Quebec, English for US/UK/Australia). You MUST write the ENTIRE subject line and email body natively in that local language!
+2. Do NOT claim to have helped other businesses or fabricate client names/portfolio links. Be honest and straightforward.
+3. Do NOT use robotic clichés like "I hope this email finds you well" or "In today's fast-paced digital landscape".
+4. Keep the email copy under 135 words. Short, punchy, and conversational.
+5. No em dashes, no exclamation-point enthusiasm.
+6. Sign off as: {sign_off}
+
+Output in EXACTLY this format, nothing else:
+LANGUAGE: <Primary local language name, e.g. English, Spanish, German>
+SUBJECT: <Subject line in local language>
 BODY:
-<email body>"""
+<Email body in local language>"""
 
     resp = _client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
     text = (resp.text or "").strip()
 
-    subject, body = "Quick question about your online presence", text
-    if "SUBJECT:" in text and "BODY:" in text:
+    language = "English"
+    subject = "Quick question about your online presence"
+    body = text
+
+    if "LANGUAGE:" in text and "SUBJECT:" in text and "BODY:" in text:
+        try:
+            lang_part, rest = text.split("SUBJECT:", 1)
+            language = lang_part.replace("LANGUAGE:", "").strip()
+            subject_part, body_part = rest.split("BODY:", 1)
+            subject = subject_part.strip()
+            body = body_part.strip()
+        except ValueError:
+            pass
+    elif "SUBJECT:" in text and "BODY:" in text:
         subject_part, body_part = text.split("BODY:", 1)
         subject = subject_part.replace("SUBJECT:", "").strip()
         body = body_part.strip()
 
-    return {"pitch_subject": subject, "pitch_body": body}
+    return {"pitch_subject": subject, "pitch_body": body, "email_language": language}

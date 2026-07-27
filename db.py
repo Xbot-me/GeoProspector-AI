@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS businesses (
     pitch_body TEXT,
     approval_status TEXT DEFAULT 'pending',
     send_status TEXT DEFAULT 'not_sent',
+    email_language TEXT DEFAULT 'English',
+    opened_at TIMESTAMP WITH TIME ZONE,
+    open_count INTEGER DEFAULT 0,
+    sent_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -77,6 +82,11 @@ _MIGRATION_COLUMNS = [
     ("lead_score", "INTEGER"),
     ("score_breakdown", "TEXT"),
     ("website", "TEXT"),
+    ("email_language", "TEXT"),
+    ("opened_at", "TIMESTAMP WITH TIME ZONE"),
+    ("open_count", "INTEGER"),
+    ("sent_at", "TIMESTAMP WITH TIME ZONE"),
+    ("error_message", "TEXT"),
 ]
 
 
@@ -177,6 +187,7 @@ _ALL_FIELDS = [
     "website_notes", "facebook_url", "instagram_url", "owner_name",
     "contact_sources", "lead_score", "score_breakdown", "analysis",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
+    "email_language", "opened_at", "open_count", "sent_at", "error_message",
 ]
 
 
@@ -255,3 +266,57 @@ def get_run_stats() -> dict:
         "approved": approved,
         "sent": sent,
     }
+
+
+def get_daily_sent_count() -> int:
+    """Return number of emails dispatched in the last 24 hours."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM businesses "
+            "WHERE send_status = 'sent' AND sent_at >= NOW() - INTERVAL '24 hours'"
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+
+def record_email_open(place_id: str, ip: str = "unknown") -> None:
+    """Record that an email was opened via tracking pixel."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE businesses SET "
+            "open_count = COALESCE(open_count, 0) + 1, "
+            "opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE place_id = %s",
+            (place_id,),
+        )
+
+
+def record_email_sent(place_id: str, status: str = "sent", error: str = None) -> None:
+    """Update send_status and sent_at timestamp when an email is dispatched."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE businesses SET "
+            "send_status = %s, "
+            "sent_at = CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE sent_at END, "
+            "error_message = %s, "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE place_id = %s",
+            (status, status, error, place_id),
+        )
+
+
+def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
+    """Fetch leads ready to be emailed (have email, not yet sent, score qualified)."""
+    from config import MIN_LEAD_SCORE
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM businesses "
+            "WHERE email IS NOT NULL AND email != '' "
+            "AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
+            "AND (lead_score IS NULL OR lead_score >= %s) "
+            "AND pitch_subject IS NOT NULL AND pitch_subject != '' "
+            "ORDER BY lead_score DESC NULLS LAST, created_at ASC "
+            "LIMIT %s",
+            (MIN_LEAD_SCORE, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
