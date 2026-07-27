@@ -17,32 +17,40 @@ import requests
 
 from config import ENABLE_WEB_SEARCH, HUNTER_API_KEY
 from state import BusinessState
+from nodes.website_check import REAL_BROWSER_HEADERS
 
 logger = logging.getLogger(__name__)
 
 HUNTER_URL = "https://api.hunter.io/v2/domain-search"
 DOMAIN_RE = re.compile(r"https?://(?:www\.)?([^/]+)")
 
-# Matches most email-like strings, deliberately broad to catch edge cases.
-EMAIL_RE = re.compile(
-    r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
+# Regex for common email patterns (excluding image extensions, dummy domains)
+_EMAIL_RE = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b"
 )
-
-# Common junk emails we should skip
-_JUNK_EMAILS = {
-    "noreply@", "no-reply@", "donotreply@", "mailer-daemon@",
-    "postmaster@", "webmaster@", "abuse@", "hostmaster@",
-    "example@", "test@", "admin@wix", "info@wix",
-    "sentry@", "support@wordpress",
+_IGNORE_DOMAINS = {
+    "example.com", "domain.com", "yoursite.com", "email.com",
+    "sentry.io", "wixpress.com", "squarespace.com",
 }
+_IGNORE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js")
 
-# Pages to check on a business website for contact info
-_CONTACT_PATHS = ("/contact", "/contact-us", "/about", "/about-us", "/impressum")
+_CONTACT_PATHS = ("/contact", "/about", "/contact-us", "/about-us", "/team")
 
 
-def _is_junk_email(email: str) -> bool:
-    email_lower = email.lower()
-    return any(junk in email_lower for junk in _JUNK_EMAILS)
+def _extract_emails_from_text(text: str) -> list[str]:
+    """Find valid email addresses in raw text/HTML."""
+    raw = _EMAIL_RE.findall(text)
+    clean = []
+    for email in raw:
+        email_lower = email.lower()
+        domain = email_lower.split("@")[-1]
+        if domain in _IGNORE_DOMAINS:
+            continue
+        if any(email_lower.endswith(ext) for ext in _IGNORE_EXTS):
+            continue
+        if email_lower not in clean:
+            clean.append(email_lower)
+    return clean
 
 
 def _extract_domain(url: str | None) -> str | None:
@@ -50,12 +58,6 @@ def _extract_domain(url: str | None) -> str | None:
         return None
     match = DOMAIN_RE.match(url)
     return match.group(1) if match else None
-
-
-def _extract_emails_from_text(text: str) -> list[str]:
-    """Find all email addresses in text, filter out junk."""
-    found = EMAIL_RE.findall(text)
-    return [e for e in found if not _is_junk_email(e)]
 
 
 def _scrape_website_emails(website: str) -> str | None:
@@ -68,8 +70,8 @@ def _scrape_website_emails(website: str) -> str | None:
     for url in urls_to_check:
         try:
             resp = requests.get(
-                url, timeout=6, allow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; OutreachBot/1.0)"},
+                url, timeout=8, allow_redirects=True,
+                headers=REAL_BROWSER_HEADERS,
             )
             if resp.status_code < 400:
                 emails = _extract_emails_from_text(resp.text)

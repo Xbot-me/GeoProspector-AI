@@ -10,10 +10,12 @@ Usage:
     # then open http://localhost:8000
 """
 import asyncio
+import base64
 import csv
 import io
 import json
 import logging
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,7 +36,7 @@ from auto_campaign import get_next_campaign_target
 from graph import build_graph, get_checkpointer_cm
 from nodes.places_search import search_businesses
 from quota import QuotaExceededError
-from config import MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL
+from config import MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL, ADMIN_USERNAME, ADMIN_PASSWORD
 
 from google import genai
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -59,6 +61,47 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Maps Outreach Agent", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def basic_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Allow public endpoints and public static assets without authentication
+    if (
+        path in ("/history", "/runs", "/public") or
+        path.startswith("/api/runs") or
+        path.startswith("/api/track/") or
+        path in ("/static/history.html", "/static/history.js", "/static/style.css", "/favicon.ico")
+    ):
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Basic "):
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
+            content="Unauthorized: Admin credentials required.",
+        )
+
+    try:
+        encoded_creds = auth_header.split(" ", 1)[1]
+        decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
+        username, _, password = decoded_creds.partition(":")
+
+        if not (secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)):
+            return Response(
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
+                content="Invalid credentials.",
+            )
+    except Exception:
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
+            content="Invalid Authorization header format.",
+        )
+
+    return await call_next(request)
 
 
 # ── Static file serving ─────────────────────────────────────────────────
@@ -341,6 +384,21 @@ async def update_lead_status(place_id: str, payload: dict):
 
 @app.websocket("/ws/{run_id}")
 async def websocket_endpoint(websocket: WebSocket, run_id: str):
+    auth_header = websocket.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Basic "):
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+    try:
+        encoded_creds = auth_header.split(" ", 1)[1]
+        decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
+        username, _, password = decoded_creds.partition(":")
+        if not (secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)):
+            await websocket.close(code=4001, reason="Invalid credentials")
+            return
+    except Exception:
+        await websocket.close(code=4001, reason="Invalid auth")
+        return
+
     await websocket.accept()
     _ws_clients.setdefault(run_id, []).append(websocket)
 
