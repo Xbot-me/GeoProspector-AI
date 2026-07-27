@@ -102,7 +102,9 @@ def _interval_worker_loop():
                 place_id=biz["place_id"],
                 to_email=biz["email"],
                 subject=biz["pitch_subject"],
-                body_text=biz["pitch_body"]
+                body_text=biz["pitch_body"],
+                rating=biz.get("rating"),
+                review_count=biz.get("review_count"),
             )
             if not success:
                 _scheduler_state["last_error"] = err
@@ -473,7 +475,9 @@ async def run_daily_campaign(request: Request):
             place_id=biz["place_id"],
             to_email=biz["email"],
             subject=biz["pitch_subject"],
-            body_text=biz["pitch_body"]
+            body_text=biz["pitch_body"],
+            rating=biz.get("rating"),
+            review_count=biz.get("review_count"),
         )
         if success:
             dispatched_count += 1
