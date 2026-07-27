@@ -39,27 +39,27 @@ def _clean_body_text(body_text: str) -> str:
 
 
 def _build_signature_html() -> str:
-    """Build modern Executive Digital Business Card signature."""
-    return """<div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #f1f5f9;">
-    <div style="border-left: 3px solid #2563eb; padding-left: 16px;">
-        <div style="font-weight: 700; font-size: 16px; color: #0f172a; letter-spacing: -0.01em;">Mustafizur Rahman</div>
-        <div style="font-size: 13px; color: #64748b; font-weight: 500; margin-top: 2px; margin-bottom: 12px;">Full-Stack Web Developer</div>
+    """Build modern Executive Digital Business Card signature with text labels."""
+    return """<div style="margin-top: 36px; padding-top: 24px; border-top: 1px solid #f1f5f9;">
+    <div style="border-left: 3px solid #2563eb; padding-left: 18px;">
+        <div style="font-weight: 700; font-size: 16px; color: #0f172a; letter-spacing: -0.01em; margin-bottom: 2px;">Mustafizur Rahman</div>
+        <div style="font-size: 13px; color: #64748b; font-weight: 500; margin-bottom: 16px;">Full-Stack Web Developer</div>
         
-        <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="font-size: 13px; color: #475569; line-height: 1.8;">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="font-size: 13px; color: #334155; line-height: 1.9;">
             <tr>
-                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">🌐</td>
-                <td><a href="https://www.mustafizur.info" style="color: #2563eb; text-decoration: none; font-weight: 500;">mustafizur.info</a></td>
+                <td style="padding-right: 14px; color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; vertical-align: baseline;">Website</td>
+                <td><a href="https://www.mustafizur.info" style="color: #2563eb; text-decoration: none; font-weight: 500;">www.mustafizur.info</a></td>
             </tr>
             <tr>
-                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">💼</td>
-                <td><a href="https://www.fiverr.com/users/mustafizur_dev/portfolio" style="color: #2563eb; text-decoration: none; font-weight: 500;">View Selected Portfolio</a></td>
+                <td style="padding-right: 14px; color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; vertical-align: baseline;">Portfolio</td>
+                <td><a href="https://www.fiverr.com/users/mustafizur_dev/portfolio" style="color: #2563eb; text-decoration: none; font-weight: 500;">Fiverr Selected Works</a></td>
             </tr>
             <tr>
-                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">✉️</td>
+                <td style="padding-right: 14px; color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; vertical-align: baseline;">Email</td>
                 <td><a href="mailto:mustafizur.dev101@gmail.com" style="color: #2563eb; text-decoration: none;">mustafizur.dev101@gmail.com</a></td>
             </tr>
             <tr>
-                <td style="padding-right: 10px; vertical-align: middle; font-size: 14px;">📱</td>
+                <td style="padding-right: 14px; color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; vertical-align: baseline;">Phone</td>
                 <td><a href="tel:+8801886769509" style="color: #475569; text-decoration: none;">+880 1886-769509</a></td>
             </tr>
         </table>
