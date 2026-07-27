@@ -320,3 +320,18 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
             (MIN_LEAD_SCORE, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_email_logs(limit: int = 50) -> list[dict]:
+    """Fetch recent email dispatch logs (sent or failed)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT place_id, name, email, send_status, sent_at, error_message, open_count, opened_at "
+            "FROM businesses "
+            "WHERE send_status IN ('sent', 'failed') OR open_count > 0 "
+            "ORDER BY COALESCE(sent_at, updated_at) DESC NULLS LAST "
+            "LIMIT %s",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+

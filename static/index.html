@@ -26,6 +26,9 @@
       <a href="/history" class="btn btn--sm" style="text-decoration: none; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--glass-border); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
         <span>🌐</span> Public Search History
       </a>
+      <button id="logoutBtn" class="btn btn--sm" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.85rem; cursor: pointer;">
+        🔒 Logout
+      </button>
       <span class="header__badge">v3 — Multilingual Auto-Pilot</span>
     </div>
   </header>
@@ -113,6 +116,25 @@
       <div class="event-feed" id="eventFeed"></div>
     </section>
 
+    <!-- ── Email Dispatch & Tracking Logs ────────────────────── -->
+    <section class="card" id="emailLogsSection" style="margin-bottom: 24px;">
+      <div class="card__title" style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px; color: var(--accent);"><path d="M22 17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V95a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          Email Dispatch & Tracking Logs
+        </div>
+        <button id="refreshLogsBtn" class="btn btn--sm" style="background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--glass-border); padding: 4px 10px; font-size: 0.8rem; cursor: pointer;">
+          🔄 Refresh Logs
+        </button>
+      </div>
+      <div id="emailLogsContent">
+        <div class="empty-state" style="padding: 24px 0;">
+          <div class="empty-state__icon" style="font-size: 1.8rem;">📭</div>
+          <div class="empty-state__text">No emails dispatched yet</div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── Leads Table ───────────────────────────────────────── -->
     <section class="card leads-section" id="leadsSection">
       <div class="card__title">
@@ -165,6 +187,8 @@
       </div>
     </div>
   </div>
+
+  <div id="toastContainer"></div>
 
   <script src="/static/app.js"></script>
 </body>
