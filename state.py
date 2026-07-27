@@ -39,9 +39,14 @@ class BusinessState(TypedDict, total=False):
     analysis: Optional[str]
     pitch_subject: Optional[str]
     pitch_body: Optional[str]
+    email_language: Optional[str]
 
     # Human-in-the-loop
     approval_status: str  # "pending" | "approved" | "edited" | "rejected" | "skipped"
 
     # Final outcome
-    send_status: str  # "not_sent" | "sent" | "failed" | "no_email"
+    send_status: str  # "not_sent" | "sent" | "failed" | "no_email" | "pending_auto_send" | "queued"
+    opened_at: Optional[str]
+    open_count: Optional[int]
+    sent_at: Optional[str]
+    error_message: Optional[str]

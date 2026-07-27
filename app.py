@@ -19,15 +19,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Thread
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import (
     get_all_leads, get_all_runs, get_business, get_businesses_for_run,
     init_db, link_business_to_run, save_search_run, update_search_run,
-    upsert_business,
+    upsert_business, record_email_open, get_pending_auto_send_leads,
+    get_daily_sent_count,
 )
+from email_sender import format_html_email, send_email
+from auto_campaign import get_next_campaign_target
 from graph import build_graph, get_checkpointer_cm
 from nodes.places_search import search_businesses
 from quota import QuotaExceededError
@@ -245,6 +248,73 @@ async def start_search(payload: dict, request: Request):
     thread.start()
 
     return {"run_id": run_id}
+
+
+@app.get("/api/track/open/{place_id}.png")
+async def track_email_open(place_id: str):
+    """Transparent 1x1 pixel image endpoint for real-time open reporting."""
+    record_email_open(place_id)
+    # Transparent 1x1 GIF byte array
+    pixel = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b'
+    return Response(content=pixel, media_type="image/gif")
+
+
+@app.post("/api/campaign/run_daily")
+async def run_daily_campaign(request: Request):
+    """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
+    # 1. Process any pending auto-send leads up to 20/day safety cap
+    sent_today = get_daily_sent_count()
+    remaining_quota = max(0, 20 - sent_today)
+    
+    pending_leads = get_pending_auto_send_leads(limit=remaining_quota)
+    dispatched_count = 0
+    for biz in pending_leads:
+        success, _ = send_email(
+            place_id=biz["place_id"],
+            to_email=biz["email"],
+            subject=biz["pitch_subject"],
+            body_text=biz["pitch_body"]
+        )
+        if success:
+            dispatched_count += 1
+
+    # 2. Select next target from curated US/Global rotation
+    target = get_next_campaign_target()
+    query = target["query"]
+    location = target["location"]
+    radius = 15000
+    max_results = 20
+
+    forwarded = request.headers.get("X-Forwarded-For")
+    ip_address = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+
+    run_id = uuid.uuid4().hex[:12]
+    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
+
+    _runs[run_id] = {
+        "status": "starting",
+        "events": [],
+        "stats": {
+            "found": 0, "good_website": 0, "low_score": 0,
+            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
+        },
+    }
+    _ws_clients.setdefault(run_id, [])
+
+    thread = Thread(
+        target=_run_pipeline_thread,
+        args=(run_id, query, location, radius, max_results),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "success": True,
+        "run_id": run_id,
+        "target": target,
+        "dispatched_from_queue": dispatched_count,
+        "daily_sent_total": sent_today + dispatched_count
+    }
 
 
 @app.post("/api/leads/{place_id}/status")

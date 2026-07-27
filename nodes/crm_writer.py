@@ -9,6 +9,10 @@ from state import BusinessState
 
 
 def save_to_crm(state: BusinessState) -> dict:
+    send_status = state.get("send_status", "not_sent")
+    if send_status == "not_sent" and state.get("email") and state.get("pitch_subject"):
+        send_status = "pending_auto_send"
+
     upsert_business({
         "place_id": state.get("place_id"),
         "name": state.get("name"),
@@ -31,7 +35,8 @@ def save_to_crm(state: BusinessState) -> dict:
         "analysis": state.get("analysis"),
         "pitch_subject": state.get("pitch_subject"),
         "pitch_body": state.get("pitch_body"),
+        "email_language": state.get("email_language", "English"),
         "approval_status": state.get("approval_status", "pending"),
-        "send_status": state.get("send_status", "not_sent"),
+        "send_status": send_status,
     })
     return {}

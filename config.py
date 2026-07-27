@@ -43,6 +43,19 @@ MAX_PLACES_CALLS_PER_MONTH = _int("MAX_PLACES_CALLS_PER_MONTH", 4000)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://appuser:secretpassword@localhost:5432/geoprospector")
 
+# Email Delivery & Auto-Pilot Outreach Settings
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "resend").lower()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+EMAIL_FROM = os.getenv("EMAIL_FROM", f"{SENDER_NAME or 'Mustafizur Rahman'} <hello@mustafizur.info>")
+
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = _int("SMTP_PORT", 587)
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+
+AUTO_SEND_EMAILS = _bool("AUTO_SEND_EMAILS", True)
+MAX_DAILY_EMAILS = _int("MAX_DAILY_EMAILS", 20)
+
 # Minimal field masks -- keep these as small as possible to control billing tier.
 # Places API (New) bills the WHOLE request at the tier of its most expensive
 # field. websiteUri lives in the "Pro" tier, so any search that needs it to
