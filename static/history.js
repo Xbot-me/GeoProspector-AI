@@ -74,8 +74,17 @@
       return;
     }
 
+function formatRunDate(dStr) {
+  if (!dStr) return 'Recent';
+  let d = new Date(dStr);
+  if (isNaN(d.getTime()) && typeof dStr === 'string') {
+    d = new Date(dStr.replace(' ', 'T'));
+  }
+  return isNaN(d.getTime()) ? 'Recent' : d.toLocaleString();
+}
+
     runsContainer.innerHTML = filtered.map(r => {
-      const dateStr = r.created_at ? new Date(r.created_at + 'Z').toLocaleString() : 'Recent';
+      const dateStr = formatRunDate(r.created_at);
       const ip = r.ip_address || 'unknown';
       const statusCls = r.status === 'complete' ? 'approved' : (r.status === 'error' ? 'rejected' : 'pending');
       const statusLabel = r.status === 'complete' ? '✓ Completed' : (r.status === 'error' ? '✕ Failed' : '⏳ Running');

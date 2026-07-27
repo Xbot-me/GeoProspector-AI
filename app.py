@@ -329,35 +329,42 @@ async def export_run_csv(run_id: str):
 
 @app.get("/api/suggest-target")
 async def suggest_target():
-    """Use Gemini to brainstorm a high-ticket, low-tech niche and growing city."""
-    if not _gemini_client:
-        return {"error": "Gemini API key not configured"}
-        
-    prompt = (
-        "I run a web design agency that builds high-converting websites for local service businesses. "
-        "I need ONE randomly generated 'High-Ticket, low-tech' niche. "
-        "This should be a business where a single customer is worth at least $2,000 to them (e.g., Roofers, HVAC, Medi-Spas, Concrete contractors, Luxury landscaping). "
-        "Also pick ONE randomly generated, rapidly growing mid-sized US city where housing or population is booming. "
-        "Format the output EXACTLY as a raw JSON object with NO markdown formatting, like this:\n"
-        '{"query": "Plumbing contractors", "location": "Boise, ID"}'
-    )
-    
+    """Use Gemini or target rotation engine to suggest a fresh, non-repetitive niche and location."""
+    # 1. Query DB for executed search runs
     try:
-        resp = _gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-        text = resp.text.strip()
-        # Clean up in case Gemini returns markdown JSON block
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-            
-        data = json.loads(text.strip())
-        return data
-    except Exception as e:
-        logger.error(f"Suggest target failed: {e}")
-        return {"error": "Failed to generate suggestion"}
+        with get_conn() as conn:
+            rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
+            executed = {(r["query"].lower().strip(), r["location"].lower().strip()) for r in rows}
+    except Exception:
+        executed = set()
+
+    # 2. If Gemini is available, pass recently executed queries to ensure Gemini gives a NEW idea
+    if _gemini_client:
+        recent_list = list(executed)[-10:] if executed else []
+        prompt = (
+            "I run a web design agency building sites for local business owners. "
+            "Suggest ONE high-ticket, low-tech local niche ($2k+ per customer value, e.g. Roofers, Solar, Tree Removal, Paving, Plumbing, Electricians, Medi-Spas) "
+            "and ONE growing city in US, UK, Canada, or Australia. "
+            f"CRITICAL: Do NOT suggest any of these already searched targets: {json.dumps(recent_list)}. "
+            "Format output as raw JSON with no markdown:\n"
+            '{"query": "Solar Installers", "location": "Austin, Texas, USA"}'
+        )
+        try:
+            resp = _gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+            text = resp.text.strip()
+            if text.startswith("```json"): text = text[7:]
+            if text.startswith("```"): text = text[3:]
+            if text.endswith("```"): text = text[:-3]
+            data = json.loads(text.strip())
+            key = (data.get("query", "").lower().strip(), data.get("location", "").lower().strip())
+            if key not in executed and data.get("query") and data.get("location"):
+                return data
+        except Exception as e:
+            logger.warning(f"Gemini target suggestion fallback: {e}")
+
+    # 3. Catalog fallback: return next unexecuted target from smart rotation
+    target = get_next_campaign_target()
+    return {"query": target["query"], "location": target["location"]}
 
 
 def _write_run_csv_to_disk(run_id: str):
