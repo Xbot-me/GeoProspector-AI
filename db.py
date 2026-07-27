@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     approval_status TEXT DEFAULT 'pending',
     send_status TEXT DEFAULT 'not_sent',
     email_language TEXT DEFAULT 'English',
+    email_verified BOOLEAN,
     opened_at TIMESTAMP WITH TIME ZONE,
     open_count INTEGER DEFAULT 0,
     sent_at TIMESTAMP WITH TIME ZONE,
@@ -69,6 +70,15 @@ CREATE TABLE IF NOT EXISTS run_businesses (
 );
 """
 
+SCHEMA_SUPPRESSION = """
+CREATE TABLE IF NOT EXISTS suppression_list (
+    email TEXT PRIMARY KEY,
+    reason TEXT,
+    source TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 # Columns that may not exist in older databases.
 _MIGRATION_COLUMNS = [
     ("rating", "REAL"),
@@ -83,6 +93,7 @@ _MIGRATION_COLUMNS = [
     ("score_breakdown", "TEXT"),
     ("website", "TEXT"),
     ("email_language", "TEXT"),
+    ("email_verified", "BOOLEAN"),
     ("opened_at", "TIMESTAMP WITH TIME ZONE"),
     ("open_count", "INTEGER"),
     ("sent_at", "TIMESTAMP WITH TIME ZONE"),
@@ -125,6 +136,7 @@ def init_db() -> None:
         conn.execute(SCHEMA_BUSINESSES)
         conn.execute(SCHEMA_RUNS)
         conn.execute(SCHEMA_RUN_BUSINESSES)
+        conn.execute(SCHEMA_SUPPRESSION)
         _migrate(conn)
 
 
@@ -187,7 +199,7 @@ _ALL_FIELDS = [
     "website_notes", "facebook_url", "instagram_url", "owner_name",
     "contact_sources", "lead_score", "score_breakdown", "analysis",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
-    "email_language", "opened_at", "open_count", "sent_at", "error_message",
+    "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
 ]
 
 
@@ -306,7 +318,9 @@ def record_email_sent(place_id: str, status: str = "sent", error: str = None) ->
 
 
 def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
-    """Fetch leads ready to be emailed (have email, not yet sent, score qualified)."""
+    """Fetch leads ready to be emailed (have email, not yet sent, score qualified).
+    Excludes unsubscribed, bounced, and complained leads.
+    Prioritizes verified emails over unverified ones."""
     from config import MIN_LEAD_SCORE
     with get_conn() as conn:
         rows = conn.execute(
@@ -315,7 +329,12 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
             "AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
             "AND (lead_score IS NULL OR lead_score >= %s) "
             "AND pitch_subject IS NOT NULL AND pitch_subject != '' "
-            "ORDER BY lead_score DESC NULLS LAST, created_at ASC "
+            "AND LOWER(email) NOT IN (SELECT LOWER(email) FROM suppression_list) "
+            "ORDER BY "
+            "  CASE WHEN email_verified = TRUE THEN 0 "
+            "       WHEN email_verified IS NULL THEN 1 "
+            "       ELSE 2 END, "
+            "  lead_score DESC NULLS LAST, created_at ASC "
             "LIMIT %s",
             (MIN_LEAD_SCORE, limit),
         ).fetchall()
@@ -381,3 +400,56 @@ def is_business_already_processed(place_id: str, name: str = "", email: str = ""
     return False
 
 
+# ── Suppression list ─────────────────────────────────────────────────────
+
+def add_to_suppression(email: str, reason: str, source: str = "manual") -> None:
+    """Add an email to the suppression list (bounced, complained, unsubscribed)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO suppression_list (email, reason, source) "
+            "VALUES (LOWER(%s), %s, %s) "
+            "ON CONFLICT (email) DO UPDATE SET reason = %s, source = %s",
+            (email, reason, source, reason, source),
+        )
+
+
+def is_suppressed(email: str) -> bool:
+    """Check if an email is on the suppression list."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM suppression_list WHERE email = LOWER(%s)",
+            (email,),
+        ).fetchone()
+        return row is not None
+
+
+def get_suppression_list() -> list[dict]:
+    """Return all suppressed emails."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM suppression_list ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def unsubscribe_business(place_id: str) -> dict | None:
+    """Mark a business as unsubscribed and add to suppression list."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT email, name FROM businesses WHERE place_id = %s", (place_id,)
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE businesses SET send_status = 'unsubscribed', updated_at = CURRENT_TIMESTAMP "
+            "WHERE place_id = %s",
+            (place_id,),
+        )
+        if row["email"]:
+            conn.execute(
+                "INSERT INTO suppression_list (email, reason, source) "
+                "VALUES (LOWER(%s), 'unsubscribed', 'unsubscribe_link') "
+                "ON CONFLICT (email) DO UPDATE SET reason = 'unsubscribed', source = 'unsubscribe_link'",
+                (row["email"],),
+            )
+        return dict(row)

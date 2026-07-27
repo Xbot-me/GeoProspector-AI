@@ -33,9 +33,10 @@ from db import (
     init_db, link_business_to_run, save_search_run, update_search_run,
     upsert_business, record_email_open, get_pending_auto_send_leads,
     get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
+    unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent,
 )
 from email_sender import format_html_email, send_email
-from auto_campaign import get_next_campaign_target
+from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
 from graph import build_graph, get_checkpointer_cm
 from nodes.places_search import search_businesses
 from quota import QuotaExceededError
@@ -87,6 +88,16 @@ def _interval_worker_loop():
 
             # Pick the first pending lead to send
             biz = pending[0]
+
+            # Timezone-aware send timing: only send during business hours
+            lead_tz = get_lead_timezone(biz.get("address", ""))
+            if not is_good_send_time(lead_tz):
+                wait_secs = seconds_until_next_window(lead_tz)
+                _scheduler_state["next_send_time"] = f"Waiting for business hours in {lead_tz} (~{wait_secs // 60}m)"
+                logger.info(f"Outside send window for {lead_tz}, sleeping {wait_secs}s")
+                time.sleep(min(wait_secs, 3600))  # Re-check at least every hour
+                continue
+
             success, err = send_email(
                 place_id=biz["place_id"],
                 to_email=biz["email"],
@@ -133,6 +144,8 @@ async def basic_auth_middleware(request: Request, call_next):
         path.startswith("/api/runs") or
         path.startswith("/api/track/") or
         path.startswith("/api/auth/") or
+        path.startswith("/api/unsubscribe/") or
+        path.startswith("/api/webhooks/") or
         path in ("/static/history.html", "/static/history.js", "/static/login.html", "/static/style.css", "/favicon.ico")
     ):
         return await call_next(request)
@@ -742,9 +755,97 @@ def _process_single_business(run_id: str, graph_app, business: dict,
     })
 
 
+# ── Unsubscribe endpoint (public — no auth required) ────────────────────
+
+@app.get("/api/unsubscribe/{place_id}")
+async def handle_unsubscribe(place_id: str):
+    """One-click unsubscribe endpoint linked in every outgoing email."""
+    result = unsubscribe_business(place_id)
+    name = result["name"] if result else "Unknown"
+    logger.info(f"Unsubscribed: {name} (place_id={place_id})")
+    # Return a simple, styled confirmation page
+    return Response(
+        content=f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unsubscribed</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex; justify-content: center; align-items: center; min-height: 100vh;
+    background: #f5f5f5; margin: 0; color: #333;">
+<div style="text-align: center; max-width: 400px; padding: 40px; background: white;
+    border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
+    <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+    <h1 style="font-size: 20px; margin: 0 0 12px;">You've been unsubscribed</h1>
+    <p style="color: #666; font-size: 14px; line-height: 1.5;">
+        You won't receive any more emails from us. Sorry for the interruption.
+    </p>
+</div>
+</body></html>""",
+        media_type="text/html",
+    )
+
+
+# ── Resend webhook endpoint (public — no auth, verified by event type) ──
+
+@app.post("/api/webhooks/resend")
+async def resend_webhook(request: Request):
+    """Handle Resend bounce/complaint/delivery webhook events."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return Response(status_code=400, content="Invalid JSON")
+
+    event_type = payload.get("type", "")
+    data = payload.get("data", {})
+    to_email = ""
+
+    # Resend sends 'to' as a list of strings
+    to_list = data.get("to", [])
+    if isinstance(to_list, list) and to_list:
+        to_email = to_list[0]
+    elif isinstance(to_list, str):
+        to_email = to_list
+
+    logger.info(f"Resend webhook: type={event_type}, to={to_email}")
+
+    if event_type == "email.bounced" and to_email:
+        add_to_suppression(to_email, reason="bounced", source="resend_webhook")
+        logger.warning(f"BOUNCE: {to_email} added to suppression list")
+
+    elif event_type == "email.complained" and to_email:
+        add_to_suppression(to_email, reason="complained", source="resend_webhook")
+        logger.warning(f"COMPLAINT: {to_email} added to suppression list")
+
+    elif event_type == "email.delivered" and to_email:
+        logger.info(f"DELIVERED: {to_email}")
+
+    return {"status": "ok"}
+
+
+# ── Suppression list API (auth required) ────────────────────────────────
+
+@app.get("/api/suppression")
+async def get_suppression():
+    """Return all emails on the suppression list."""
+    return get_suppression_list()
+
+
+@app.post("/api/suppression/add")
+async def add_suppression(request: Request):
+    """Manually add an email to the suppression list."""
+    body = await request.json()
+    email = body.get("email", "").strip()
+    reason = body.get("reason", "manual")
+    if not email or "@" not in email:
+        return Response(status_code=400, content="Invalid email")
+    add_to_suppression(email, reason=reason, source="manual")
+    return {"status": "ok", "email": email}
+
+
 # ── Entry point ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     print("\n  🗺️  Maps Outreach Agent (Sniper Mode)")
     print("  Dashboard: http://localhost:8000\n")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+

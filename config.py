@@ -63,9 +63,23 @@ SMTP_PASS = os.getenv("SMTP_PASS", "")
 AUTO_SEND_EMAILS = _bool("AUTO_SEND_EMAILS", True)
 MAX_DAILY_EMAILS = _int("MAX_DAILY_EMAILS", 20)
 
+# CAN-SPAM compliance — legally required in every commercial email
+SENDER_PHYSICAL_ADDRESS = os.getenv("SENDER_PHYSICAL_ADDRESS", "")
+UNSUBSCRIBE_BASE_URL = os.getenv("UNSUBSCRIBE_BASE_URL", "https://b2b.mustafizur.info")
+
 # Dashboard Security & Authentication
+# Fail-fast: refuse to start with the old hardcoded default on a public deploy.
+_raw_admin_pw = os.getenv("ADMIN_PASSWORD", "")
+if not _raw_admin_pw:
+    import warnings
+    warnings.warn(
+        "ADMIN_PASSWORD is not set in .env — using insecure default. "
+        "Set a strong password before exposing to the internet.",
+        stacklevel=2,
+    )
+    _raw_admin_pw = "mustafizur2026"  # keep working locally, but warn loudly
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mustafizur2026")
+ADMIN_PASSWORD = _raw_admin_pw
 
 # Minimal field masks -- keep these as small as possible to control billing tier.
 # Places API (New) bills the WHOLE request at the tier of its most expensive

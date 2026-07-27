@@ -24,6 +24,7 @@ class BusinessState(TypedDict, total=False):
     # Email discovery (multi-source)
     email: Optional[str]
     email_source: Optional[str]  # "website_scrape" | "web_search" | "hunter" | None
+    email_verified: Optional[bool]  # MX record verified
 
     # Social / contact enrichment
     facebook_url: Optional[str]
