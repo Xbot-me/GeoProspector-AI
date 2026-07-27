@@ -15,42 +15,56 @@ HOME_SERVICE_NICHES = [
     "Roofers",
     "Landscaping Services",
     "Cleaning Companies",
+    "Solar Installers",
+    "Tree Removal Services",
+    "Concrete Contractors",
+    "Garage Door Repair",
+    "Kitchen & Bath Remodelers",
+    "Pest Control Services",
+    "Commercial Construction",
 ]
 
 TARGET_CITIES = [
-    # North Carolina
+    # Tier 1: Premier Opportunities (High Revenue, Low Tech, Low Agency Competition)
+    ("Bend", "Oregon, USA"),
+    ("Greenville", "South Carolina, USA"),
+    ("Kelowna", "British Columbia, Canada"),
+    ("Tyler", "Texas, USA"),
+    ("Aberdeen", "Scotland, United Kingdom"),
+    ("Fargo", "North Dakota, USA"),
+    ("Boise", "Idaho, USA"),
+    ("Lancaster", "Pennsylvania, USA"),
+    ("Linz", "Austria"),
+    ("Pensacola", "Florida, USA"),
+    ("Sudbury", "Ontario, Canada"),
+    ("Tampere", "Finland"),
+    ("Greenville", "North Carolina, USA"),
+    ("Santander", "Cantabria, Spain"),
+    ("Appleton", "Wisconsin, USA"),
+
+    # Tier 2: High-Growth Regional Corridors
     ("Asheville", "North Carolina, USA"),
     ("Wilmington", "North Carolina, USA"),
-    ("Greenville", "North Carolina, USA"),
-    ("Hickory", "North Carolina, USA"),
-    # Tennessee
     ("Chattanooga", "Tennessee, USA"),
     ("Knoxville", "Tennessee, USA"),
-    ("Clarksville", "Tennessee, USA"),
-    # Texas (smaller cities)
+    ("Guelph", "Ontario, Canada"),
     ("Waco", "Texas, USA"),
-    ("Tyler", "Texas, USA"),
-    ("Abilene", "Texas, USA"),
-    ("College Station", "Texas, USA"),
-    # Florida (outside Miami/Orlando)
-    ("Gainesville", "Florida, USA"),
-    ("Ocala", "Florida, USA"),
-    ("Lakeland", "Florida, USA"),
-    ("Pensacola", "Florida, USA"),
-    # Ohio
-    ("Dayton", "Ohio, USA"),
-    ("Toledo", "Ohio, USA"),
-    ("Akron", "Ohio, USA"),
-    ("Canton", "Ohio, USA"),
-    # Pennsylvania
-    ("Lancaster", "Pennsylvania, USA"),
+    ("Stavanger", "Norway"),
     ("Erie", "Pennsylvania, USA"),
-    ("Scranton", "Pennsylvania, USA"),
-    # Michigan
+    ("Brest", "France"),
+    ("Dayton", "Ohio, USA"),
+    ("Odense", "Denmark"),
     ("Grand Rapids", "Michigan, USA"),
+    ("Augsburg", "Germany"),
+    ("Lafayette", "Louisiana, USA"),
+    ("Swansea", "Wales, United Kingdom"),
     ("Kalamazoo", "Michigan, USA"),
-    ("Lansing", "Michigan, USA"),
-    # Global Targets (multilingual & high purchasing power)
+    ("Gainesville", "Florida, USA"),
+    ("Turku", "Finland"),
+    ("Monroe", "Louisiana, USA"),
+    ("Coimbra", "Portugal"),
+
+    # Tier 3: Global & Niche Trade Hubs
     ("Manchester", "United Kingdom"),
     ("Bristol", "United Kingdom"),
     ("Sydney", "Australia"),
@@ -68,50 +82,60 @@ TARGET_CITIES = [
 # Timezone mapping for every city in TARGET_CITIES
 # ---------------------------------------------------------------------------
 CITY_TIMEZONES: dict[str, str] = {
-    # North Carolina  (Eastern)
+    # US Eastern
+    "Greenville":       "America/New_York",
     "Asheville":        "America/New_York",
     "Wilmington":       "America/New_York",
-    "Greenville":       "America/New_York",
-    "Hickory":          "America/New_York",
-    # Tennessee  (Eastern)
-    "Chattanooga":      "America/New_York",
-    "Knoxville":        "America/New_York",
-    "Clarksville":      "America/Chicago",
-    # Texas  (Central)
-    "Waco":             "America/Chicago",
-    "Tyler":            "America/Chicago",
-    "Abilene":          "America/Chicago",
-    "College Station":  "America/Chicago",
-    # Florida  (Eastern / Central split)
-    "Gainesville":      "America/New_York",
-    "Ocala":            "America/New_York",
-    "Lakeland":         "America/New_York",
-    "Pensacola":        "America/Chicago",
-    # Ohio  (Eastern)
-    "Dayton":           "America/New_York",
-    "Toledo":           "America/New_York",
-    "Akron":            "America/New_York",
-    "Canton":           "America/New_York",
-    # Pennsylvania  (Eastern)
     "Lancaster":        "America/New_York",
+    "Gainesville":      "America/New_York",
+    "Pensacola":        "America/Chicago",
+    "Dayton":           "America/New_York",
     "Erie":             "America/New_York",
-    "Scranton":         "America/New_York",
-    # Michigan  (Eastern)
     "Grand Rapids":     "America/New_York",
     "Kalamazoo":        "America/New_York",
-    "Lansing":          "America/New_York",
-    # International
-    "Manchester":       "Europe/London",
-    "Bristol":          "Europe/London",
-    "Sydney":           "Australia/Sydney",
-    "Melbourne":        "Australia/Melbourne",
+    "Chattanooga":      "America/New_York",
+    "Knoxville":        "America/New_York",
+    "Appleton":         "America/Chicago",
+    
+    # US Central & Mountain & Pacific
+    "Tyler":            "America/Chicago",
+    "Waco":             "America/Chicago",
+    "Lafayette":        "America/Chicago",
+    "Monroe":           "America/Chicago",
+    "Fargo":            "America/Chicago",
+    "Boise":            "America/Boise",
+    "Bend":             "America/Los_Angeles",
+
+    # Canada
+    "Kelowna":          "America/Vancouver",
+    "Sudbury":          "America/Toronto",
+    "Guelph":           "America/Toronto",
     "Vancouver":        "America/Vancouver",
     "Calgary":          "America/Edmonton",
+
+    # Europe & Global
+    "Aberdeen":         "Europe/London",
+    "Manchester":       "Europe/London",
+    "Bristol":          "Europe/London",
+    "Swansea":          "Europe/London",
     "Dublin":           "Europe/Dublin",
+    "Linz":             "Europe/Vienna",
+    "Tampere":          "Europe/Helsinki",
+    "Turku":            "Europe/Helsinki",
+    "Santander":        "Europe/Madrid",
     "Madrid":           "Europe/Madrid",
-    "Berlin":           "Europe/Berlin",
+    "Brest":            "Europe/Paris",
     "Paris":            "Europe/Paris",
+    "Stavanger":        "Europe/Oslo",
+    "Odense":           "Europe/Copenhagen",
+    "Augsburg":         "Europe/Berlin",
+    "Berlin":           "Europe/Berlin",
+    "Coimbra":          "Europe/Lisbon",
     "Zurich":           "Europe/Zurich",
+
+    # Australia
+    "Sydney":           "Australia/Sydney",
+    "Melbourne":        "Australia/Melbourne",
 }
 
 _DEFAULT_TZ = "America/New_York"
