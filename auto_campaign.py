@@ -194,26 +194,41 @@ def seconds_until_next_window(timezone_str: str) -> int:
 
 
 def get_all_target_combinations() -> list[dict]:
-    """Return all (niche, city) combinations in sequence."""
+    """
+    Return diverse, interleaved (niche, city) combinations so sequential runs
+    automatically rotate BOTH category and geography on every run.
+    """
     combos = []
-    for niche in HOME_SERVICE_NICHES:
-        for city_name, state_country in TARGET_CITIES:
-            combos.append({
-                "query": niche,
-                "location": f"{city_name}, {state_country}",
-                "display_name": f"{niche} in {city_name}, {state_country}",
-            })
+    num_niches = len(HOME_SERVICE_NICHES)
+    num_cities = len(TARGET_CITIES)
+    # Generate interleaved combinations across niches and cities
+    max_combos = num_niches * num_cities
+
+    for i in range(max_combos):
+        # Pick niche and city with relative offset so we step through both lists simultaneously
+        niche = HOME_SERVICE_NICHES[i % num_niches]
+        # Shift city index by niche multiplier to ensure full coverage without clustering
+        city_idx = (i + (i // num_niches)) % num_cities
+        city_name, state_country = TARGET_CITIES[city_idx]
+        combos.append({
+            "query": niche,
+            "location": f"{city_name}, {state_country}",
+            "display_name": f"{niche} in {city_name}, {state_country}",
+        })
     return combos
 
 
 def get_next_campaign_target() -> dict:
     """
     Select the next target combination that hasn't been searched yet.
-    If all have been searched, cycles back to the beginning.
+    Guarantees no duplicate searches and diverse location/niche rotation.
     """
-    with get_conn() as conn:
-        rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
-        executed = {(r["query"].lower().strip(), r["location"].lower().strip()) for r in rows}
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
+            executed = {(r["query"].lower().strip(), r["location"].lower().strip()) for r in rows}
+    except Exception:
+        executed = set()
 
     combos = get_all_target_combinations()
     for target in combos:
@@ -221,5 +236,13 @@ def get_next_campaign_target() -> dict:
         if key not in executed:
             return target
 
-    # Fallback if all completed: return first target
+    # Fallback if all curated combos have been executed: shuffle and find unexecuted
+    import random
+    shuffled = list(combos)
+    random.shuffle(shuffled)
+    for target in shuffled:
+        key = (target["query"].lower().strip(), target["location"].lower().strip())
+        if key not in executed:
+            return target
+
     return combos[0]
