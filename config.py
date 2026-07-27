@@ -41,8 +41,7 @@ SENDER_NAME = os.getenv("SENDER_NAME", "")
 MAX_PLACES_RESULTS_PER_RUN = _int("MAX_PLACES_RESULTS_PER_RUN", 25)
 MAX_PLACES_CALLS_PER_MONTH = _int("MAX_PLACES_CALLS_PER_MONTH", 4000)
 
-CRM_DB_PATH = os.getenv("CRM_DB_PATH", "crm.sqlite3")
-CHECKPOINTS_DB_PATH = os.getenv("CHECKPOINTS_DB_PATH", "checkpoints.sqlite3")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://appuser:secretpassword@localhost:5432/geoprospector")
 
 # Minimal field masks -- keep these as small as possible to control billing tier.
 # Places API (New) bills the WHOLE request at the tier of its most expensive

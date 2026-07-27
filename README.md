@@ -20,10 +20,10 @@ Whether you run a web design agency, a marketing firm, or a SaaS company, GeoPro
 * **Beautiful Web Dashboard:** A sleek, dark-mode real-time UI built with FastAPI and WebSockets to monitor the pipeline as it hunts for leads.
 
 ## 🛠️ Tech Stack
-- **Backend:** Python, FastAPI, LangGraph, SQLite
+- **Backend:** Python, FastAPI, LangGraph, PostgreSQL
 - **Frontend:** Vanilla HTML/CSS/JS (WebSockets for real-time updates)
 - **AI Integrations:** Google Gemini (Flash-Lite), Google Places API (New)
-- **Deployment:** Docker, Docker Compose
+- **Deployment:** Docker, Docker Compose (with PostgreSQL 16 service)
 
 ---
 
@@ -77,7 +77,7 @@ GeoProspector AI isn't just a scraper; it's an intelligent multi-agent pipeline.
 2. **Contact Discovery:** Runs multi-stage enrichment to hunt down the business owner's email and social media links.
 3. **Lead Scoring:** Assigns a composite score. If the business already has a fantastic website, it skips generating a pitch but still extracts the data.
 4. **AI Pitch Generation:** If the lead is qualified, the agent generates a custom cold email referencing their specific Google reviews and website flaws (e.g., pitching a modernization vs. a brand-new build).
-5. **Database Storage:** Saves the business and the pitch to a local SQLite CRM database and auto-exports to a CSV file.
+5. **Database Storage:** Saves the business and the pitch to a PostgreSQL database and auto-exports to a CSV file.
 
 ## 💰 API Costs & Free Tiers
 

@@ -7,14 +7,32 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgresql://appuser:${POSTGRES_PASSWORD:-secretpassword}@db:5432/geoprospector
+    depends_on:
+      - db
     volumes:
       - maps_outreach_data:/app/data
     networks:
       - securemonitor_default
     # No ports exposed to host. Caddy will route to this container internally on port 8000.
 
+  db:
+    image: postgres:16-alpine
+    container_name: maps-outreach-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: geoprospector
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - securemonitor_default
+
 volumes:
   maps_outreach_data:
+  postgres_data:
 
 networks:
   securemonitor_default:
