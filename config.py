@@ -56,6 +56,10 @@ SMTP_PASS = os.getenv("SMTP_PASS", "")
 AUTO_SEND_EMAILS = _bool("AUTO_SEND_EMAILS", True)
 MAX_DAILY_EMAILS = _int("MAX_DAILY_EMAILS", 20)
 
+# Dashboard Security & Authentication
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mustafizur2026")
+
 # Minimal field masks -- keep these as small as possible to control billing tier.
 # Places API (New) bills the WHOLE request at the tier of its most expensive
 # field. websiteUri lives in the "Pro" tier, so any search that needs it to

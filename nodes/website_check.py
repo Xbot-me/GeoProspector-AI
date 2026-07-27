@@ -40,6 +40,31 @@ _CONSTRUCTION_PHRASES = (
     "this domain is for sale",
 )
 
+REAL_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Connection": "keep-alive",
+}
+
+_WAF_PHRASES = (
+    "just a moment...",
+    "attention required! | cloudflare",
+    "access denied",
+    "sucuri website firewall",
+    "security by imperva",
+    "checking your browser",
+    "enable javascript and cookies to continue",
+    "please stand by, while we are checking your browser",
+    "request blocked",
+    "blocked by cloudflare",
+)
+
 
 def _check_quality(html: str) -> tuple[str, str]:
     """
@@ -108,18 +133,49 @@ def check_website(state: BusinessState) -> dict:
             social_data["website_notes"] = f"Website is just a social link: {website}"
         return social_data
 
-    # Try to fetch the actual page
+    # Try to fetch the actual page with realistic desktop browser headers
     try:
         resp = requests.get(
-            website, timeout=8, allow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; OutreachBot/1.0)"},
+            website, timeout=10, allow_redirects=True,
+            headers=REAL_BROWSER_HEADERS,
         )
+        if resp.status_code in (403, 406, 429, 503, 509, 520, 521, 522, 523, 524, 525):
+            return {
+                "has_real_website": True,
+                "website_quality": "good",
+                "website_notes": f"Live website (protected by firewall/bot defense: HTTP {resp.status_code})",
+            }
         if resp.status_code >= 400:
             return {
                 "has_real_website": False,
                 "website_quality": "dead",
                 "website_notes": f"HTTP {resp.status_code}",
             }
+        
+        # Check if page content returned a Cloudflare or WAF challenge page despite HTTP 200/300
+        text_lower = resp.text.lower()[:5000]
+        for phrase in _WAF_PHRASES:
+            if phrase in text_lower:
+                return {
+                    "has_real_website": True,
+                    "website_quality": "good",
+                    "website_notes": "Live website (protected by Cloudflare/WAF challenge)",
+                }
+
+    except (requests.exceptions.SSLError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
+        # Some WAFs (like Cloudflare or Sucuri) drop TLS/TCP connections from automated crawlers or foreign VPS IPs
+        err_str = str(e).lower()
+        if "ssl" in err_str or "handshake" in err_str or "read timed out" in err_str or "reset by peer" in err_str:
+            return {
+                "has_real_website": True,
+                "website_quality": "good",
+                "website_notes": f"Live website (bot/location firewall dropped connection: {type(e).__name__})",
+            }
+        return {
+            "has_real_website": False,
+            "website_quality": "dead",
+            "website_notes": f"Connection failed: {type(e).__name__}",
+        }
     except requests.RequestException as e:
         return {
             "has_real_website": False,

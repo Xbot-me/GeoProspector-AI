@@ -26,10 +26,11 @@ def format_html_email(body_text: str, place_id: str) -> str:
     """Wrap plain text in clean professional HTML with open tracking pixel."""
     # Convert line breaks to paragraphs and breaks
     paragraphs = body_text.strip().split("\n\n")
-    html_paragraphs = "".join(
-        f"<p style='margin-bottom: 16px; line-height: 1.6;'>{p.replace('\n', '<br>')}</p>"
-        for p in paragraphs
-    )
+    formatted_p = []
+    for p in paragraphs:
+        p_br = p.replace("\n", "<br>")
+        formatted_p.append(f"<p style='margin-bottom: 16px; line-height: 1.6;'>{p_br}</p>")
+    html_paragraphs = "".join(formatted_p)
 
     tracking_pixel = (
         f"<img src='{TRACKING_BASE_URL}/api/track/open/{place_id}.png' "
