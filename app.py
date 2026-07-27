@@ -15,9 +15,12 @@ import csv
 import io
 import json
 import logging
+import random
 import secrets
+import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Thread
 
@@ -29,7 +32,7 @@ from db import (
     get_all_leads, get_all_runs, get_business, get_businesses_for_run,
     init_db, link_business_to_run, save_search_run, update_search_run,
     upsert_business, record_email_open, get_pending_auto_send_leads,
-    get_daily_sent_count, get_email_logs,
+    get_daily_sent_count, get_email_logs, clear_email_logs,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target
@@ -53,6 +56,57 @@ _ws_clients: dict[str, list[WebSocket]] = {}
 # Maps session token -> username for modern HTML login page
 _sessions: dict[str, str] = {}
 
+# Background interval email scheduler state
+_scheduler_state = {
+    "is_running": False,
+    "next_send_time": None,
+    "scheduled_count": 0,
+    "interval_minutes": 30,
+    "last_error": None,
+}
+
+
+def _interval_worker_loop():
+    logger.info("Starting background interval email sender...")
+    _scheduler_state["is_running"] = True
+    while True:
+        try:
+            sent_today = get_daily_sent_count()
+            if sent_today >= 20:
+                _scheduler_state["next_send_time"] = "Daily quota reached (20/20)"
+                time.sleep(300)
+                continue
+
+            pending = get_pending_auto_send_leads(limit=100)
+            _scheduler_state["scheduled_count"] = len(pending)
+
+            if not pending:
+                _scheduler_state["next_send_time"] = "Queue empty (waiting for leads...)"
+                time.sleep(60)
+                continue
+
+            # Pick the first pending lead to send
+            biz = pending[0]
+            success, err = send_email(
+                place_id=biz["place_id"],
+                to_email=biz["email"],
+                subject=biz["pitch_subject"],
+                body_text=biz["pitch_body"]
+            )
+            if not success:
+                _scheduler_state["last_error"] = err
+
+            # Sleep for randomized interval (25 to 35 minutes)
+            delay_mins = random.randint(25, 35)
+            next_time = datetime.now() + timedelta(minutes=delay_mins)
+            _scheduler_state["next_send_time"] = f"{next_time.strftime('%I:%M %p')} (~{delay_mins}m interval)"
+            time.sleep(delay_mins * 60)
+        except Exception as e:
+            logger.error(f"Interval worker exception: {e}")
+            _scheduler_state["last_error"] = str(e)
+            time.sleep(60)
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -60,6 +114,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    thread = Thread(target=_interval_worker_loop, daemon=True)
+    thread.start()
     yield
 
 
@@ -167,6 +223,28 @@ async def logout_endpoint(request: Request, response: Response):
 async def list_email_logs():
     """Return recent email send logs and tracking statuses."""
     return get_email_logs(limit=100)
+
+
+@app.get("/api/scheduler/status")
+async def get_scheduler_status():
+    sent_today = get_daily_sent_count()
+    pending = get_pending_auto_send_leads(limit=100)
+    _scheduler_state["scheduled_count"] = len(pending)
+    return {
+        "is_running": _scheduler_state["is_running"],
+        "scheduled_count": len(pending),
+        "daily_sent_total": sent_today,
+        "daily_limit": 20,
+        "next_send_time": _scheduler_state["next_send_time"] or ("Queue empty" if not pending else "Calculating..."),
+        "last_error": _scheduler_state.get("last_error")
+    }
+
+
+@app.post("/api/email-logs/clear")
+async def clear_logs_endpoint():
+    count = clear_email_logs()
+    _scheduler_state["last_error"] = None
+    return {"success": True, "cleared_count": count}
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────
@@ -354,11 +432,11 @@ async def track_email_open(place_id: str):
 @app.post("/api/campaign/run_daily")
 async def run_daily_campaign(request: Request):
     """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
-    # 1. Process any pending auto-send leads up to 20/day safety cap
+    # 1. Process 1 pending auto-send lead immediately (the background interval worker handles the rest)
     sent_today = get_daily_sent_count()
     remaining_quota = max(0, 20 - sent_today)
     
-    pending_leads = get_pending_auto_send_leads(limit=remaining_quota)
+    pending_leads = get_pending_auto_send_leads(limit=1 if remaining_quota > 0 else 0)
     dispatched_count = 0
     for biz in pending_leads:
         success, _ = send_email(
