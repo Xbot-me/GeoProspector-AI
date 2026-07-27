@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Thread
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -65,6 +65,13 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.get("/")
 async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+@app.get("/history")
+@app.get("/runs")
+@app.get("/public")
+async def history_page():
+    return FileResponse(str(STATIC_DIR / "history.html"))
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────
@@ -198,7 +205,7 @@ def _write_run_csv_to_disk(run_id: str):
 
 
 @app.post("/api/search")
-async def start_search(payload: dict):
+async def start_search(payload: dict, request: Request):
     """Start a pipeline run in the background."""
     query = payload.get("query", "").strip()
     location = payload.get("location", "").strip()
@@ -208,10 +215,16 @@ async def start_search(payload: dict):
     if not query or not location:
         return {"error": "query and location are required"}
 
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        ip_address = forwarded.split(",")[0].strip()
+    else:
+        ip_address = request.client.host if request.client else "unknown"
+
     run_id = uuid.uuid4().hex[:12]
 
     # Persist the search run to DB immediately
-    save_search_run(run_id, query, location, radius, max_results)
+    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
 
     _runs[run_id] = {
         "status": "starting",

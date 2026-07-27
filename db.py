@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS search_runs (
     max_results INTEGER,
     result_count INTEGER DEFAULT 0,
     status TEXT DEFAULT 'running',
+    ip_address TEXT DEFAULT 'unknown',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -90,7 +91,7 @@ def get_conn():
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Add new columns to an existing table without losing data."""
+    """Add new columns to existing tables without losing data."""
     cursor = conn.execute("PRAGMA table_info(businesses)")
     existing = {row[1] for row in cursor.fetchall()}
     for col_name, col_type in _MIGRATION_COLUMNS:
@@ -98,6 +99,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 f"ALTER TABLE businesses ADD COLUMN {col_name} {col_type}"
             )
+
+    cursor_runs = conn.execute("PRAGMA table_info(search_runs)")
+    existing_runs = {row[1] for row in cursor_runs.fetchall()}
+    if "ip_address" not in existing_runs:
+        conn.execute("ALTER TABLE search_runs ADD COLUMN ip_address TEXT DEFAULT 'unknown'")
 
 
 def init_db() -> None:
@@ -111,13 +117,13 @@ def init_db() -> None:
 # ── Search runs ──────────────────────────────────────────────────────────
 
 def save_search_run(run_id: str, query: str, location: str,
-                    radius: int, max_results: int) -> None:
+                    radius: int, max_results: int, ip_address: str = "unknown") -> None:
     with get_conn() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO search_runs "
-            "(run_id, query, location, radius, max_results) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (run_id, query, location, radius, max_results),
+            "(run_id, query, location, radius, max_results, ip_address) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, query, location, radius, max_results, ip_address),
         )
 
 
