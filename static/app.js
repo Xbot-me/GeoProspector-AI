@@ -612,6 +612,21 @@
     });
   }
 
+  const retryFailedBtn = $('#retryFailedBtn');
+  if (retryFailedBtn) {
+    retryFailedBtn.addEventListener('click', async () => {
+      try {
+        const resp = await fetch('/api/email-logs/retry-failed', { method: 'POST' });
+        const data = await resp.json();
+        showToast(`⚡ Re-queued ${data.requeued_count || 0} failed leads into dispatch queue!`, "success");
+        loadEmailLogs();
+        loadSchedulerStatus();
+      } catch (e) {
+        showToast("Error re-queueing failed leads.", "error");
+      }
+    });
+  }
+
   const clearLogsBtn = $('#clearLogsBtn');
   if (clearLogsBtn) {
     let clearConfirm = false;

@@ -33,7 +33,7 @@ from db import (
     init_db, link_business_to_run, save_search_run, update_search_run,
     upsert_business, record_email_open, get_pending_auto_send_leads,
     get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
-    unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent,
+    unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
@@ -258,6 +258,16 @@ async def clear_logs_endpoint():
     count = clear_email_logs()
     _scheduler_state["last_error"] = None
     return {"success": True, "cleared_count": count}
+
+
+@app.post("/api/email-logs/retry-failed")
+async def retry_failed_endpoint():
+    count = retry_failed_emails()
+    _scheduler_state["last_error"] = None
+    # Recalculate scheduled count
+    pending = get_pending_auto_send_leads(limit=100)
+    _scheduler_state["scheduled_count"] = len(pending)
+    return {"success": True, "requeued_count": count, "scheduled_count": len(pending)}
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────
