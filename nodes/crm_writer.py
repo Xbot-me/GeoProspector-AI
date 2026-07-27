@@ -1,7 +1,7 @@
 """
 Node: save_to_crm
 
-Writes/updates the business row in the local SQLite CRM at each stage so
+Writes/updates the business row in the PostgreSQL CRM database at each stage so
 progress is never lost even if a later node fails.
 """
 from db import upsert_business

@@ -20,7 +20,6 @@ The pipeline no longer pauses for human approval or attempts to send emails.
 It runs start-to-finish for all prospects, drafting pitches and saving to CRM
 so the user can manually review and contact them via the dashboard.
 """
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 
 from nodes.business_analyzer import analyze_business
@@ -78,8 +77,13 @@ def build_graph(checkpointer=None):
     return graph.compile(checkpointer=checkpointer)
 
 
-from config import CHECKPOINTS_DB_PATH
+from contextlib import contextmanager
+from langgraph.checkpoint.postgres import PostgresSaver
+from config import DATABASE_URL
 
+@contextmanager
 def get_checkpointer_cm():
-    """Returns the SqliteSaver context manager -- use with `with ... as cp:`."""
-    return SqliteSaver.from_conn_string(CHECKPOINTS_DB_PATH)
+    """Returns the PostgresSaver context manager and ensures checkpointer tables are initialized."""
+    with PostgresSaver.from_conn_string(DATABASE_URL) as checkpointer:
+        checkpointer.setup()
+        yield checkpointer

@@ -13,6 +13,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
@@ -31,8 +32,7 @@ COPY --chown=appuser:appuser . .
 # Expose the port the app runs on
 EXPOSE 8000
 
-ENV CRM_DB_PATH=/app/data/crm.sqlite3
-ENV CHECKPOINTS_DB_PATH=/app/data/checkpoints.sqlite3
+ENV DATABASE_URL=postgresql://appuser:secretpassword@db:5432/geoprospector
 
 # Run the FastAPI app with Uvicorn
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
