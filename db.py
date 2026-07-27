@@ -366,6 +366,17 @@ def clear_email_logs() -> int:
         return cursor.rowcount
 
 
+def retry_failed_emails() -> int:
+    """Re-queue all failed email dispatches by resetting send_status to 'pending_auto_send'."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "UPDATE businesses "
+            "SET send_status = 'pending_auto_send', error_message = NULL "
+            "WHERE send_status = 'failed' AND email IS NOT NULL AND email != ''"
+        )
+        return cursor.rowcount
+
+
 def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
     """Check if a business has already been processed or contacted (100% solid deduplication)."""
     with get_conn() as conn:
