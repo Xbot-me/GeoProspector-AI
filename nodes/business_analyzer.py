@@ -70,7 +70,7 @@ In 3-4 short bullet points, note:
    restaurant, appointment booking for a salon)
 3. If they have good Google reviews, mention that as an asset they could
    leverage better with a proper website
-
+Prioritize opportunities where a solo senior developer can realistically close $2,000-$20,000 projects or create recurring SaaS revenue without needing a large sales team.
 Be concrete and avoid generic filler. Output only the bullets, no preamble."""
 
     resp = _client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
