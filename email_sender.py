@@ -1,7 +1,8 @@
 """
 Email delivery client supporting both Resend API and Direct SMTP.
 Automatically wraps plain text pitches in a responsive HTML layout with
-an embedded 1x1 tracking pixel for real-time open reporting.
+an embedded 1x1 tracking pixel for real-time open reporting and a
+CAN-SPAM compliant footer with one-click unsubscribe.
 """
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -17,8 +18,10 @@ from config import (
     SMTP_USER,
     SMTP_PASS,
     SENDER_SIGNATURE,
+    SENDER_PHYSICAL_ADDRESS,
+    UNSUBSCRIBE_BASE_URL,
 )
-from db import record_email_sent
+from db import record_email_sent, is_suppressed
 
 TRACKING_BASE_URL = "https://b2b.mustafizur.info"
 
@@ -35,8 +38,21 @@ def _clean_body_text(body_text: str) -> str:
     return f"{body_text.strip()}\n\n{SENDER_SIGNATURE}"
 
 
+def _build_canspam_footer(place_id: str) -> str:
+    """Build the CAN-SPAM compliant footer HTML block."""
+    unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
+    address = SENDER_PHYSICAL_ADDRESS or "Dhaka, Bangladesh"
+    return f"""
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; font-size: 11px; color: #999999; line-height: 1.5;">
+        <p style="margin: 0 0 4px 0;">{address}</p>
+        <p style="margin: 0;">
+            Not interested? <a href="{unsub_url}" style="color: #999999; text-decoration: underline;">Unsubscribe</a> and you won't hear from me again.
+        </p>
+    </div>"""
+
+
 def format_html_email(body_text: str, place_id: str) -> str:
-    """Wrap plain text in clean professional HTML with open tracking pixel."""
+    """Wrap plain text in clean professional HTML with open tracking pixel and CAN-SPAM footer."""
     # Convert line breaks to paragraphs and breaks
     paragraphs = body_text.strip().split("\n\n")
     formatted_p = []
@@ -50,6 +66,8 @@ def format_html_email(body_text: str, place_id: str) -> str:
         "width='1' height='1' alt='' style='display:none; border:0;' />"
     )
 
+    canspam_footer = _build_canspam_footer(place_id)
+
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -59,6 +77,7 @@ def format_html_email(body_text: str, place_id: str) -> str:
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: #222222; margin: 0; padding: 20px;">
     <div style="max-width: 580px; margin: 0 auto;">
         {html_paragraphs}
+        {canspam_footer}
         {tracking_pixel}
     </div>
 </body>
@@ -69,14 +88,27 @@ def send_email(place_id: str, to_email: str, subject: str, body_text: str) -> tu
     """
     Dispatch email using configured provider (resend or smtp).
     Returns (success, error_message).
+    Checks suppression list before sending.
     """
     if not to_email or "@" not in to_email:
         err = f"Invalid recipient email: '{to_email}'"
         record_email_sent(place_id, status="failed", error=err)
         return False, err
 
+    # Check suppression list (bounced, complained, unsubscribed)
+    if is_suppressed(to_email):
+        err = f"Suppressed: '{to_email}' is on the suppression list (bounce/complaint/unsubscribe)"
+        record_email_sent(place_id, status="failed", error=err)
+        return False, err
+
     body_text = _clean_body_text(body_text)
     html_body = format_html_email(body_text, place_id)
+
+    # Build plain-text footer for the text/plain MIME part
+    unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
+    address = SENDER_PHYSICAL_ADDRESS or "Dhaka, Bangladesh"
+    plain_footer = f"\n\n---\n{address}\nUnsubscribe: {unsub_url}"
+    body_text_with_footer = body_text + plain_footer
 
     # 1. Resend API
     if EMAIL_PROVIDER == "resend":
@@ -98,7 +130,11 @@ def send_email(place_id: str, to_email: str, subject: str, body_text: str) -> tu
                     "to": [to_email],
                     "subject": subject,
                     "html": html_body,
-                    "text": body_text,
+                    "text": body_text_with_footer,
+                    "headers": {
+                        "List-Unsubscribe": f"<{unsub_url}>",
+                        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                    },
                 },
                 timeout=15,
             )
@@ -126,8 +162,10 @@ def send_email(place_id: str, to_email: str, subject: str, body_text: str) -> tu
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
         msg["To"] = to_email
+        msg["List-Unsubscribe"] = f"<{unsub_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
-        msg.attach(MIMEText(body_text, "plain", "utf-8"))
+        msg.attach(MIMEText(body_text_with_footer, "plain", "utf-8"))
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         try:

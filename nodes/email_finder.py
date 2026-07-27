@@ -143,21 +143,43 @@ def find_email(state: BusinessState) -> dict:
     name = state.get("name", "")
     address = state.get("address", "")
 
+    email = None
+    source = None
+
     # 1. Scrape the business's own website
     if website:
         email = _scrape_website_emails(website)
         if email:
-            return {"email": email, "email_source": "website_scrape"}
+            source = "website_scrape"
 
     # 2. Search the web
-    email = _search_web_for_email(name, address)
-    if email:
-        return {"email": email, "email_source": "web_search"}
+    if not email:
+        email = _search_web_for_email(name, address)
+        if email:
+            source = "web_search"
 
     # 3. Hunter.io fallback
-    domain = _extract_domain(website)
-    email = _hunter_search(domain)
-    if email:
-        return {"email": email, "email_source": "hunter"}
+    if not email:
+        domain = _extract_domain(website)
+        email = _hunter_search(domain)
+        if email:
+            source = "hunter"
 
-    return {"email": None, "email_source": None}
+    if not email:
+        return {"email": None, "email_source": None, "email_verified": None}
+
+    # 4. Verify email via MX record lookup
+    try:
+        from email_verifier import verify_email
+        result = verify_email(email)
+        verified = result.get("valid", None)
+        if verified is False:
+            logger.warning(f"Email verification failed for {email}: {result.get('reason')}")
+        else:
+            logger.info(f"Email verified: {email} (mx_found={result.get('mx_found')})")
+    except Exception as e:
+        logger.error(f"Email verification error for {email}: {e}")
+        verified = None  # Fail-open: don't discard on verification errors
+
+    return {"email": email, "email_source": source, "email_verified": verified}
+
