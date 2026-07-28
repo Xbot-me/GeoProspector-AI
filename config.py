@@ -64,7 +64,7 @@ AUTO_SEND_EMAILS = _bool("AUTO_SEND_EMAILS", True)
 MAX_DAILY_EMAILS = _int("MAX_DAILY_EMAILS", 20)
 
 # CAN-SPAM compliance — legally required in every commercial email
-SENDER_PHYSICAL_ADDRESS = os.getenv("SENDER_PHYSICAL_ADDRESS", "")
+SENDER_PHYSICAL_ADDRESS = os.getenv("SENDER_PHYSICAL_ADDRESS", "") or "Dhaka, Bangladesh"
 UNSUBSCRIBE_BASE_URL = os.getenv("UNSUBSCRIBE_BASE_URL", "https://b2b.mustafizur.info")
 
 # Dashboard Security & Authentication
