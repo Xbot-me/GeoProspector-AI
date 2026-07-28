@@ -109,7 +109,7 @@ def _build_cta_html() -> str:
 
 
 def _build_signature_html() -> str:
-    """Slim one-line signature — 100% domain aligned with sending domain (hello@mustafizur.info)."""
+    """Slim signature — 100% domain-aligned links only (mustafizur.info)."""
     return """<tr>
     <td style="padding:0 32px 30px 32px; border-top:1px solid #f1f5f9;">
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
@@ -117,7 +117,7 @@ def _build_signature_html() -> str:
           <td style="font-size:13px; color:#334155; line-height:1.9;">
             <a href="mailto:hello@mustafizur.info" style="color:#2563eb; text-decoration:none; font-weight:500;">hello@mustafizur.info</a>
             &nbsp;&middot;&nbsp;
-            <a href="tel:+8801886769509" style="color:#475569; text-decoration:none;">+880 1886-769509</a>
+            <span style="color:#475569;">+880 1886-769509</span>
           </td>
         </tr>
       </table>
