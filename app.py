@@ -82,9 +82,18 @@ def _interval_worker_loop():
             _scheduler_state["scheduled_count"] = len(pending)
 
             if not pending:
-                _scheduler_state["next_send_time"] = "Queue empty (waiting for leads...)"
-                time.sleep(60)
-                continue
+                # Check if any search run is actively running right now
+                active_runs = [r for r, d in _runs.items() if d.get("status") in ("starting", "running")]
+                if not active_runs:
+                    logger.info("Queue empty — automatically launching auto-pilot search run...")
+                    run_id, target = trigger_auto_pilot_search_run(ip_address="auto_pilot_daemon")
+                    _scheduler_state["next_send_time"] = f"Auto-discovering leads: {target['query']} in {target['location']}"
+                    time.sleep(45)
+                    continue
+                else:
+                    _scheduler_state["next_send_time"] = "Auto-discovering new leads..."
+                    time.sleep(30)
+                    continue
 
             # Pick the first pending lead to send
             biz = pending[0]
@@ -461,6 +470,36 @@ async def track_email_open(place_id: str):
     return Response(content=pixel, media_type="image/gif")
 
 
+def trigger_auto_pilot_search_run(ip_address: str = "auto_pilot") -> tuple[str, dict]:
+    """Select next campaign target from rotation and launch search run pipeline in background."""
+    target = get_next_campaign_target()
+    query = target["query"]
+    location = target["location"]
+    radius = 15000
+    max_results = 20
+
+    run_id = uuid.uuid4().hex[:12]
+    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
+
+    _runs[run_id] = {
+        "status": "starting",
+        "events": [],
+        "stats": {
+            "found": 0, "good_website": 0, "low_score": 0,
+            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
+        },
+    }
+    _ws_clients.setdefault(run_id, [])
+
+    thread = Thread(
+        target=_run_pipeline_thread,
+        args=(run_id, query, location, radius, max_results),
+        daemon=True,
+    )
+    thread.start()
+    return run_id, target
+
+
 @app.post("/api/campaign/run_daily")
 async def run_daily_campaign(request: Request):
     """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
@@ -482,35 +521,10 @@ async def run_daily_campaign(request: Request):
         if success:
             dispatched_count += 1
 
-    # 2. Select next target from curated US/Global rotation
-    target = get_next_campaign_target()
-    query = target["query"]
-    location = target["location"]
-    radius = 15000
-    max_results = 20
-
+    # 2. Select next target from curated US/Global rotation and launch run
     forwarded = request.headers.get("X-Forwarded-For")
     ip_address = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-
-    run_id = uuid.uuid4().hex[:12]
-    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
-
-    _runs[run_id] = {
-        "status": "starting",
-        "events": [],
-        "stats": {
-            "found": 0, "good_website": 0, "low_score": 0,
-            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
-        },
-    }
-    _ws_clients.setdefault(run_id, [])
-
-    thread = Thread(
-        target=_run_pipeline_thread,
-        args=(run_id, query, location, radius, max_results),
-        daemon=True,
-    )
-    thread.start()
+    run_id, target = trigger_auto_pilot_search_run(ip_address=ip_address)
 
     return {
         "success": True,
