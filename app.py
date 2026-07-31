@@ -82,18 +82,9 @@ def _interval_worker_loop():
             _scheduler_state["scheduled_count"] = len(pending)
 
             if not pending:
-                # Check if any search run is actively running right now
-                active_runs = [r for r, d in _runs.items() if d.get("status") in ("starting", "running")]
-                if not active_runs:
-                    logger.info("Queue empty — automatically launching auto-pilot search run...")
-                    run_id, target = trigger_auto_pilot_search_run(ip_address="auto_pilot_daemon")
-                    _scheduler_state["next_send_time"] = f"Auto-discovering leads: {target['query']} in {target['location']}"
-                    time.sleep(45)
-                    continue
-                else:
-                    _scheduler_state["next_send_time"] = "Auto-discovering new leads..."
-                    time.sleep(30)
-                    continue
+                _scheduler_state["next_send_time"] = "Queue empty (waiting for leads...)"
+                time.sleep(60)
+                continue
 
             # Pick the first pending lead to send
             biz = pending[0]

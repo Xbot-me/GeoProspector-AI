@@ -138,6 +138,7 @@ def init_db() -> None:
         conn.execute(SCHEMA_RUN_BUSINESSES)
         conn.execute(SCHEMA_SUPPRESSION)
         _migrate(conn)
+        conn.execute("DELETE FROM search_runs WHERE ip_address = 'auto_pilot_daemon'")
 
 
 # ── Search runs ──────────────────────────────────────────────────────────
@@ -464,3 +465,13 @@ def unsubscribe_business(place_id: str) -> dict | None:
                 (row["email"],),
             )
         return dict(row)
+
+
+def delete_daemon_search_runs() -> int:
+    """Delete search runs created by the automated daemon loop."""
+    try:
+        with get_conn() as conn:
+            cursor = conn.execute("DELETE FROM search_runs WHERE ip_address = 'auto_pilot_daemon'")
+            return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+    except Exception:
+        return 0
