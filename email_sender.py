@@ -28,150 +28,21 @@ TRACKING_BASE_URL = "https://b2b.mustafizur.info"
 WEBSITE_URL = "https://www.mustafizur.info"
 
 
-def _clean_body_text(body_text: str) -> str:
-    """Safety guarantee: ensure existing db leads or manual sends have the full signature."""
-    if "mustafizur.info" in body_text:
-        return body_text
-    for placeholder in ("[Your Name]", "[Your name]", "[your name]", "[YOUR NAME]"):
-        if placeholder in body_text:
-            return body_text.replace(placeholder, SENDER_SIGNATURE).strip()
-    if "Mustafizur Rahman" in body_text:
-        return body_text.replace("Mustafizur Rahman", SENDER_SIGNATURE).strip()
-    return f"{body_text.strip()}\n\n{SENDER_SIGNATURE}"
-
-
-def _build_header_html() -> str:
-    """Dark letterhead bar with monogram badge — establishes who's emailing up front."""
-    return """<tr>
-    <td style="background-color:#0f172a; padding:22px 32px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="vertical-align:middle;">
-            <table role="presentation" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="width:36px; height:36px; background:linear-gradient(135deg,#2563eb,#06b6d4); border-radius:9px; text-align:center; vertical-align:middle; font-weight:700; font-size:14px; color:#ffffff; font-family:Arial, sans-serif;">MR</td>
-                <td style="padding-left:12px;">
-                  <div style="color:#ffffff; font-weight:700; font-size:14px; letter-spacing:-0.01em;">Mustafizur Rahman</div>
-                  <div style="color:#94a3b8; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.06em;">Web Developer &nbsp;&middot;&nbsp; Local Business Sites</div>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-  <tr><td style="height:3px; background:linear-gradient(90deg,#2563eb,#06b6d4); font-size:0; line-height:0;">&nbsp;</td></tr>"""
-
-
-def _build_stat_card_html(rating: float | None, review_count: int | None) -> str:
-    """Highlight the lead's own Google rating/review count as a visual badge.
-    Returns an empty string when we don't have both data points to show."""
-    if rating is None or review_count is None:
-        return ""
-    return f"""<tr>
-    <td style="padding:0 32px 20px 32px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:12px;">
-        <tr>
-          <td style="padding:18px 22px;">
-            <table role="presentation" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="padding-right:28px; vertical-align:top;">
-                  <div style="font-size:26px; font-weight:800; color:#0f172a; line-height:1;">{rating:g}<span style="color:#f59e0b; font-size:16px;">&#9733;</span></div>
-                  <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-top:4px;">Average rating</div>
-                </td>
-                <td style="border-left:1px solid #e2e8f0; padding-left:28px; vertical-align:top;">
-                  <div style="font-size:26px; font-weight:800; color:#0f172a; line-height:1;">{review_count}</div>
-                  <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-top:4px;">Customer reviews</div>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>"""
-
-
-def _build_cta_html() -> str:
-    """Single CTA linking to the main portfolio site."""
-    return f"""<tr>
-    <td style="padding:0 32px 36px 32px;" align="center">
-      <table role="presentation" cellpadding="0" cellspacing="0">
-        <tr>
-          <td style="background:linear-gradient(90deg,#2563eb,#0ea5e9); border-radius:10px;">
-            <a href="{WEBSITE_URL}" style="display:inline-block; padding:13px 30px; font-size:14px; font-weight:600; color:#ffffff; text-decoration:none; letter-spacing:0.01em;">Visit mustafizur.info &nbsp;&rarr;</a>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>"""
-
-
-def _build_signature_html() -> str:
-    """Slim signature — 100% domain-aligned links only (mustafizur.info)."""
-    return """<tr>
-    <td style="padding:0 32px 30px 32px; border-top:1px solid #f1f5f9;">
-      <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
-        <tr>
-          <td style="font-size:13px; color:#334155; line-height:1.9;">
-            <a href="mailto:hello@mustafizur.info" style="color:#2563eb; text-decoration:none; font-weight:500;">hello@mustafizur.info</a>
-            &nbsp;&middot;&nbsp;
-            <span style="color:#475569;">+880 1886-769509</span>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>"""
-
-
-def _build_canspam_footer_html(place_id: str) -> str:
-    """CAN-SPAM compliant footer block."""
-    unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
-    address = SENDER_PHYSICAL_ADDRESS or "Dhaka, Bangladesh"
-    return f"""<tr>
-    <td style="background-color:#f8fafc; padding:18px 32px; font-size:11px; color:#94a3b8; line-height:1.6;">
-      <p style="margin:0 0 4px 0;">{address}</p>
-      <p style="margin:0;">Not interested in website upgrades? <a href="{unsub_url}" style="color:#94a3b8; text-decoration:underline;">Unsubscribe here</a> to opt out.</p>
-    </td>
-  </tr>"""
-
-
 def format_html_email(
     body_text: str,
     place_id: str,
     rating: float | None = None,
     review_count: int | None = None,
 ) -> str:
-    """Wrap plain text in the letterhead-style responsive HTML email:
-    header, optional rating/review stat card, body copy, CTA button,
-    slim signature, CAN-SPAM footer, tracking pixel."""
-    # Strip the plain-text signature block from the copy — the header/signature
-    # blocks already cover that, so we don't want it duplicated in the body.
-    if "Mustafizur Rahman" in body_text:
-        main_copy = body_text.split("Mustafizur Rahman")[0].strip()
-    else:
-        main_copy = body_text.strip()
-
-    paragraphs = main_copy.split("\n\n")
+    """Format plain text as clean HTML paragraphs with an embedded tracking pixel."""
+    paragraphs = body_text.strip().split("\n\n")
     formatted_p = []
     for p in paragraphs:
         if not p.strip():
             continue
         p_br = p.replace("\n", "<br>")
-        p_br = re.sub(
-            r'(https?://[^\s<]+)',
-            r'<a href="\1" style="color: #2563eb; font-weight: 500; text-decoration: none;">\1</a>',
-            p_br,
-        )
-        formatted_p.append(f"<p style='margin: 0 0 16px 0; line-height: 1.65; color: #334155;'>{p_br}</p>")
+        formatted_p.append(f"<p style='margin: 0 0 16px 0; line-height: 1.6; color: #1e293b; font-family: sans-serif; font-size: 15px;'>{p_br}</p>")
     html_paragraphs = "".join(formatted_p)
-
-    header_html = _build_header_html()
-    stat_card_html = _build_stat_card_html(rating, review_count)
-    cta_html = _build_cta_html()
-    signature_html = _build_signature_html()
-    footer_html = _build_canspam_footer_html(place_id)
 
     tracking_pixel = (
         f"<img src='{TRACKING_BASE_URL}/api/track/open/{place_id}.png' "
@@ -184,19 +55,10 @@ def format_html_email(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin:0; padding:32px 16px; background-color:#eef1f5;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; margin:0 auto; background-color:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 6px 24px rgba(15,23,42,0.08);">
-        {header_html}
-        <tr>
-            <td style="padding:34px 32px 8px 32px;">
-                {html_paragraphs}
-            </td>
-        </tr>
-        {stat_card_html}
-        {cta_html}
-        {signature_html}
-        {footer_html}
-    </table>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin:0; padding:24px 16px; background-color:#ffffff;">
+    <div style="max-width:600px; margin:0 auto;">
+        {html_paragraphs}
+    </div>
     {tracking_pixel}
 </body>
 </html>"""
@@ -228,7 +90,6 @@ def send_email(
         record_email_sent(place_id, status="failed", error=err)
         return False, err
 
-    body_text = _clean_body_text(body_text)
     html_body = format_html_email(body_text, place_id, rating=rating, review_count=review_count)
 
     # Build plain-text footer for the text/plain MIME part

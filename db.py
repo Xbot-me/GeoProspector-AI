@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     lead_score INTEGER,
     score_breakdown TEXT,
     analysis TEXT,
+    mockup_prompt TEXT,
     pitch_subject TEXT,
     pitch_body TEXT,
     approval_status TEXT DEFAULT 'pending',
@@ -198,7 +199,7 @@ _ALL_FIELDS = [
     "place_id", "name", "address", "phone", "category", "website", "email",
     "email_source", "rating", "review_count", "website_quality",
     "website_notes", "facebook_url", "instagram_url", "owner_name",
-    "contact_sources", "lead_score", "score_breakdown", "analysis",
+    "contact_sources", "lead_score", "score_breakdown", "analysis", "mockup_prompt",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
 ]

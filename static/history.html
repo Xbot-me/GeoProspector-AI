@@ -3,172 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Public Search Archive — Maps Outreach Agent</title>
-  <meta name="description" content="Public repository of AI-enriched local business leads, emails, social profiles, and search analytics.">
+  <title>Public Search Archive — GeoProspector AI</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌐</text></svg>">
-  <style>
-    .ip-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 0.75rem;
-      font-family: monospace;
-      background: var(--bg-hover);
-      color: var(--text-accent);
-      padding: 2px 8px;
-      border-radius: 4px;
-      border: 1px solid var(--glass-border);
-    }
-    .filter-bar {
-      margin-bottom: 24px;
-      display: flex;
-      gap: 12px;
-    }
-    .filter-bar input {
-      flex: 1;
-      background: var(--bg-surface);
-      border: 1px solid var(--glass-border);
-      color: var(--text-primary);
-      padding: 10px 16px;
-      border-radius: var(--radius-sm);
-      font-size: 0.95rem;
-      outline: none;
-      transition: var(--transition);
-    }
-    .filter-bar input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-glow);
-    }
-    .run-card {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-md);
-      padding: 16px 20px;
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      transition: var(--transition);
-    }
-    .run-card:hover {
-      border-color: rgba(34, 211, 238, 0.3);
-      transform: translateY(-1px);
-    }
-    .run-card__info {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .run-card__title {
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .run-card__meta {
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-    .run-card__actions {
-      display: flex;
-      gap: 8px;
-    }
-    .social-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      color: var(--accent-light);
-      text-decoration: none;
-      font-size: 0.85rem;
-      background: var(--bg-elevated);
-      padding: 2px 6px;
-      border-radius: 4px;
-      margin-right: 4px;
-    }
-    .social-link:hover {
-      background: var(--bg-hover);
-    }
-  </style>
 </head>
 <body>
 
-  <!-- ── Header ────────────────────────────────────────────── -->
+  <!-- ── Top Header ─────────────────────────────────────────── -->
   <header class="header">
     <div class="header__brand">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="2" y1="12" x2="22" y2="12"></line>
         <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
       </svg>
       Public Search Archive
     </div>
-    <div style="display: flex; align-items: center; gap: 12px;">
-      <a href="/" class="btn btn--primary btn--sm" style="text-decoration: none; display: flex; align-items: center; gap: 6px;">
-        <span>🗺️</span> New Search Dashboard
+    <div class="header__actions">
+      <a href="/" class="btn btn--sm">
+        New Search Workbench
       </a>
-      <span class="header__badge">Open Data Portal</span>
     </div>
   </header>
 
   <main class="container">
 
-    <!-- ── Intro Panel ───────────────────────────────────────── -->
-    <section class="card" style="margin-bottom: 24px;">
-      <div class="card__title">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        AI-Enriched Lead Intelligence & Search History
+    <!-- ── Filter & Header Panel ──────────────────────────────── -->
+    <section class="ledger-panel">
+      <div class="ledger-panel__title">
+        <span>Search Run Ledger</span>
+        <span id="runsCount" class="mono" style="font-size:12px; color:var(--text-muted);">Loading...</span>
       </div>
-      <p style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">
-        Explore all real-time lead generation runs executed on this server. Every search automatically audits local business websites, extracts direct owner/company email addresses, discovers social media profiles (Facebook & Instagram), and calculates AI lead conversion scores. All records are publicly accessible for research and outreach.
-      </p>
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <input type="text" id="filterInput" placeholder="Filter search runs by query or location (e.g. Dhaka, Austin, plumbers)..." style="flex:1;">
+        <button class="btn btn--outline" id="btnRefresh">
+          Refresh
+        </button>
+      </div>
     </section>
 
-    <!-- ── Filter ────────────────────────────────────────────── -->
-    <div class="filter-bar">
-      <input type="text" id="filterInput" placeholder="🔍 Filter runs by business keyword or location (e.g. restaurants, Dhaka, plumbing)...">
-      <button class="btn btn--skip" id="btnRefresh" style="height: 44px; padding: 0 16px;" title="Refresh list">
-        🔄 Refresh
-      </button>
-    </div>
-
-    <!-- ── Runs List ─────────────────────────────────────────── -->
-    <section class="card">
-      <div class="card__title" style="justify-content: space-between;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Search Run History
-        </div>
-        <span id="runsCount" style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal;">Loading...</span>
-      </div>
+    <!-- ── Runs Ledger Container ───────────────────────────────── -->
+    <section class="ledger-panel">
       <div id="runsContainer">
-        <div class="empty-state">
-          <div class="empty-state__icon">⏳</div>
-          <div class="empty-state__text">Loading search history...</div>
+        <div style="text-align:center; padding:32px; color:var(--text-muted);">
+          Loading search run history...
         </div>
       </div>
     </section>
 
-    <!-- ── Enriched Leads Modal / Section ─────────────────────── -->
-    <section class="card leads-section hidden" id="leadsSection" style="margin-top: 32px;">
-      <div class="card__title" style="justify-content: space-between;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          <span id="leadsTitle">Enriched Leads</span>
-        </div>
+    <!-- ── Enriched Leads Details Modal/Section ───────────────── -->
+    <section class="ledger-panel hidden" id="leadsSection">
+      <div class="ledger-panel__title">
+        <span id="leadsTitle">Enriched Leads</span>
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn--skip btn--sm" id="btnExportRunCsv">📥 Download CSV</button>
-          <button class="btn btn--sm" id="btnCloseLeads" style="background: var(--bg-hover); border: 1px solid var(--glass-border); color: var(--text-primary);">✕ Close</button>
+          <button class="btn btn--outline btn--sm" id="btnExportRunCsv">Export CSV</button>
+          <button class="btn btn--rust btn--sm" id="btnCloseLeads">Close</button>
         </div>
       </div>
       <div id="leadsContent"></div>
     </section>
+
   </main>
 
   <script src="/static/history.js"></script>

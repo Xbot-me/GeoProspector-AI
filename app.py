@@ -31,12 +31,12 @@ from fastapi.staticfiles import StaticFiles
 from db import (
     get_all_leads, get_all_runs, get_business, get_businesses_for_run,
     init_db, link_business_to_run, save_search_run, update_search_run,
-    upsert_business, record_email_open, get_pending_auto_send_leads,
-    get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
+    upsert_business, record_email_open,
+    get_email_logs, clear_email_logs, is_business_already_processed,
     unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
 )
-from email_sender import format_html_email, send_email
-from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
+from email_sender import send_email
+from auto_campaign import get_next_campaign_target
 from graph import build_graph, get_checkpointer_cm
 from nodes.places_search import search_businesses
 from quota import QuotaExceededError
@@ -57,68 +57,6 @@ _ws_clients: dict[str, list[WebSocket]] = {}
 # Maps session token -> username for modern HTML login page
 _sessions: dict[str, str] = {}
 
-# Background interval email scheduler state
-_scheduler_state = {
-    "is_running": False,
-    "next_send_time": None,
-    "scheduled_count": 0,
-    "interval_minutes": 30,
-    "last_error": None,
-}
-
-
-def _interval_worker_loop():
-    logger.info("Starting background interval email sender...")
-    _scheduler_state["is_running"] = True
-    while True:
-        try:
-            sent_today = get_daily_sent_count()
-            if sent_today >= 20:
-                _scheduler_state["next_send_time"] = "Daily quota reached (20/20)"
-                time.sleep(300)
-                continue
-
-            pending = get_pending_auto_send_leads(limit=100)
-            _scheduler_state["scheduled_count"] = len(pending)
-
-            if not pending:
-                _scheduler_state["next_send_time"] = "Queue empty (waiting for leads...)"
-                time.sleep(60)
-                continue
-
-            # Pick the first pending lead to send
-            biz = pending[0]
-
-            # Timezone-aware send timing: only send during business hours
-            lead_tz = get_lead_timezone(biz.get("address", ""))
-            if not is_good_send_time(lead_tz):
-                wait_secs = seconds_until_next_window(lead_tz)
-                _scheduler_state["next_send_time"] = f"Waiting for business hours in {lead_tz} (~{wait_secs // 60}m)"
-                logger.info(f"Outside send window for {lead_tz}, sleeping {wait_secs}s")
-                time.sleep(min(wait_secs, 3600))  # Re-check at least every hour
-                continue
-
-            success, err = send_email(
-                place_id=biz["place_id"],
-                to_email=biz["email"],
-                subject=biz["pitch_subject"],
-                body_text=biz["pitch_body"],
-                rating=biz.get("rating"),
-                review_count=biz.get("review_count"),
-            )
-            if not success:
-                _scheduler_state["last_error"] = err
-
-            # Sleep for randomized interval (25 to 35 minutes)
-            delay_mins = random.randint(25, 35)
-            next_time = datetime.now() + timedelta(minutes=delay_mins)
-            _scheduler_state["next_send_time"] = f"{next_time.strftime('%I:%M %p')} (~{delay_mins}m interval)"
-            time.sleep(delay_mins * 60)
-        except Exception as e:
-            logger.error(f"Interval worker exception: {e}")
-            _scheduler_state["last_error"] = str(e)
-            time.sleep(60)
-
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -127,8 +65,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    thread = Thread(target=_interval_worker_loop, daemon=True)
-    thread.start()
     yield
 
 
@@ -341,8 +277,7 @@ async def export_run_csv(run_id: str):
 
 @app.get("/api/suggest-target")
 async def suggest_target():
-    """Use Gemini or target rotation engine to suggest a fresh, non-repetitive niche and location."""
-    # 1. Query DB for executed search runs
+    """Use Gemini or target rotation engine to suggest a fresh target location for finding businesses."""
     try:
         with get_conn() as conn:
             rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
@@ -350,16 +285,14 @@ async def suggest_target():
     except Exception:
         executed = set()
 
-    # 2. If Gemini is available, pass recently executed queries to ensure Gemini gives a NEW idea
     if _gemini_client:
         recent_list = list(executed)[-10:] if executed else []
         prompt = (
             "I run a web design agency building sites for local business owners. "
-            "Suggest ONE high-ticket, low-tech local niche ($2k+ per customer value, e.g. Roofers, Solar, Tree Removal, Paving, Plumbing, Electricians, Medi-Spas) "
-            "and ONE growing city in US, UK, Canada, or Australia. "
-            f"CRITICAL: Do NOT suggest any of these already searched targets: {json.dumps(recent_list)}. "
+            "Suggest ONE specific city in the US, UK, Canada, Australia, or Europe. "
+            f"CRITICAL: Do NOT suggest any of these already searched locations: {json.dumps(recent_list)}. "
             "Format output as raw JSON with no markdown:\n"
-            '{"query": "Solar Installers", "location": "Austin, Texas, USA"}'
+            '{"query": "local businesses", "location": "Austin, Texas, USA"}'
         )
         try:
             resp = _gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
@@ -374,7 +307,6 @@ async def suggest_target():
         except Exception as e:
             logger.warning(f"Gemini target suggestion fallback: {e}")
 
-    # 3. Catalog fallback: return next unexecuted target from smart rotation
     target = get_next_campaign_target()
     return {"query": target["query"], "location": target["location"]}
 
@@ -461,88 +393,44 @@ async def track_email_open(place_id: str):
     return Response(content=pixel, media_type="image/gif")
 
 
-def trigger_auto_pilot_search_run(ip_address: str = "auto_pilot") -> tuple[str, dict]:
-    """Select next campaign target from rotation and launch search run pipeline in background."""
-    target = get_next_campaign_target()
-    query = target["query"]
-    location = target["location"]
-    radius = 15000
-    max_results = 20
-
-    run_id = uuid.uuid4().hex[:12]
-    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
-
-    _runs[run_id] = {
-        "status": "starting",
-        "events": [],
-        "stats": {
-            "found": 0, "good_website": 0, "low_score": 0,
-            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
-        },
-    }
-    _ws_clients.setdefault(run_id, [])
-
-    thread = Thread(
-        target=_run_pipeline_thread,
-        args=(run_id, query, location, radius, max_results),
-        daemon=True,
-    )
-    thread.start()
-    return run_id, target
-
-
-@app.post("/api/campaign/run_daily")
-async def run_daily_campaign(request: Request):
-    """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
-    # 1. Process 1 pending auto-send lead immediately (the background interval worker handles the rest)
-    sent_today = get_daily_sent_count()
-    remaining_quota = max(0, 20 - sent_today)
+@app.post("/api/leads/{place_id}/build-kit")
+async def build_outreach_kit_endpoint(place_id: str):
+    """Generate an outreach kit (analysis, mockup prompt, email draft) for a single lead."""
+    from nodes.outreach_kit_generator import generate_outreach_kit
+    biz = get_business(place_id)
+    if not biz:
+        return Response(status_code=404, content="Lead not found")
     
-    pending_leads = get_pending_auto_send_leads(limit=1 if remaining_quota > 0 else 0)
-    dispatched_count = 0
-    for biz in pending_leads:
-        success, _ = send_email(
-            place_id=biz["place_id"],
-            to_email=biz["email"],
-            subject=biz["pitch_subject"],
-            body_text=biz["pitch_body"],
-            rating=biz.get("rating"),
-            review_count=biz.get("review_count"),
-        )
-        if success:
-            dispatched_count += 1
-
-    # 2. Select next target from curated US/Global rotation and launch run
-    forwarded = request.headers.get("X-Forwarded-For")
-    ip_address = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-    run_id, target = trigger_auto_pilot_search_run(ip_address=ip_address)
-
-    return {
-        "success": True,
-        "run_id": run_id,
-        "target": target,
-        "dispatched_from_queue": dispatched_count,
-        "daily_sent_total": sent_today + dispatched_count
-    }
+    kit = generate_outreach_kit(biz)
+    biz.update(kit)
+    upsert_business(biz)
+    return biz
 
 
 @app.post("/api/leads/{place_id}/status")
 async def update_lead_status(place_id: str, payload: dict):
-    """Manually mark a lead as contacted or rejected from the UI."""
-    status = payload.get("status")  # 'sent' or 'rejected'
+    """Manually update lead status (e.g. 'sent' or 'not_sent') or draft content."""
+    status = payload.get("status")  # 'sent' or 'not_sent' or 'rejected'
     
     biz = get_business(place_id)
     if not biz:
-        return {"error": "not found"}
+        return Response(status_code=404, content="Lead not found")
 
     if status == "sent":
         biz["send_status"] = "sent"
         biz["approval_status"] = "approved"
+        biz["sent_at"] = datetime.now().isoformat()
+    elif status == "not_sent":
+        biz["send_status"] = "not_sent"
     elif status == "rejected":
         biz["approval_status"] = "rejected"
     
-    upsert_business(biz)
+    if "pitch_body" in payload:
+        biz["pitch_body"] = payload["pitch_body"]
+    if "pitch_subject" in payload:
+        biz["pitch_subject"] = payload["pitch_subject"]
 
+    upsert_business(biz)
     return {"success": True, "send_status": biz["send_status"], "approval_status": biz["approval_status"]}
 
 
