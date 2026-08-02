@@ -3,10 +3,18 @@
  */
 
 let state = {
-  activeTab: 'potential', // 'potential' | 'queue'
+  activeTab: 'potential', // 'potential' | 'queue' | 'good'
   leads: [],
   activeRunId: null,
   ws: null,
+  sortColumn: 'score', // 'score' | 'date' | 'name'
+  sortDirection: 'desc', // 'desc' | 'asc'
+  filters: {
+    search: '',
+    category: '',
+    condition: '',
+    minScore: 0,
+  }
 };
 
 // ── DOM Element References ──────────────────────────────────────────────
@@ -20,14 +28,28 @@ const exportBtn = document.getElementById('exportBtn');
 const suggestBtn = document.getElementById('suggestBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 
+// Filter Inputs
+const filterSearch = document.getElementById('filterSearch');
+const filterCategory = document.getElementById('filterCategory');
+const filterCondition = document.getElementById('filterCondition');
+const filterMinScore = document.getElementById('filterMinScore');
+const resetFiltersBtn = document.getElementById('resetFiltersBtn');
+
+// Tabs
 const tabPotentialBtn = document.getElementById('tabPotentialBtn');
 const tabQueueBtn = document.getElementById('tabQueueBtn');
+const tabGoodBtn = document.getElementById('tabGoodBtn');
+
 const tabPotentialContent = document.getElementById('tabPotentialContent');
 const tabQueueContent = document.getElementById('tabQueueContent');
+const tabGoodContent = document.getElementById('tabGoodContent');
 
 const badgePotential = document.getElementById('badgePotential');
 const badgeQueue = document.getElementById('badgeQueue');
+const badgeGood = document.getElementById('badgeGood');
+
 const potentialTableBody = document.getElementById('potentialTableBody');
+const goodTableBody = document.getElementById('goodTableBody');
 const queueList = document.getElementById('queueList');
 
 const progressSection = document.getElementById('progressSection');
@@ -48,28 +70,83 @@ function setupEventListeners() {
   // Tabs
   tabPotentialBtn.addEventListener('click', () => switchTab('potential'));
   tabQueueBtn.addEventListener('click', () => switchTab('queue'));
+  tabGoodBtn.addEventListener('click', () => switchTab('good'));
 
-  // Search
+  // Search & Actions
   searchForm.addEventListener('submit', handleSearchSubmit);
   exportBtn.addEventListener('click', handleExportCSV);
   suggestBtn.addEventListener('click', handleSuggestTarget);
   logoutBtn.addEventListener('click', handleLogout);
+
+  // Filters
+  filterSearch.addEventListener('input', (e) => { state.filters.search = e.target.value; renderLeads(); });
+  filterCategory.addEventListener('change', (e) => { state.filters.category = e.target.value; renderLeads(); });
+  filterCondition.addEventListener('change', (e) => { state.filters.condition = e.target.value; renderLeads(); });
+  filterMinScore.addEventListener('input', (e) => { state.filters.minScore = parseInt(e.target.value) || 0; renderLeads(); });
+  resetFiltersBtn.addEventListener('click', resetFilters);
+
+  // Table Column Sort Headers
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.getAttribute('data-sort');
+      if (state.sortColumn === col) {
+        state.sortDirection = state.sortDirection === 'desc' ? 'asc' : 'desc';
+      } else {
+        state.sortColumn = col;
+        state.sortDirection = 'desc';
+      }
+      updateSortIndicators();
+      renderLeads();
+    });
+  });
+}
+
+
+function resetFilters() {
+  state.filters.search = '';
+  state.filters.category = '';
+  state.filters.condition = '';
+  state.filters.minScore = 0;
+
+  filterSearch.value = '';
+  filterCategory.value = '';
+  filterCondition.value = '';
+  filterMinScore.value = 0;
+
+  renderLeads();
+}
+
+
+function updateSortIndicators() {
+  ['score', 'date', 'name'].forEach(col => {
+    const el = document.getElementById(`sort-indicator-${col}`);
+    if (el) {
+      if (state.sortColumn === col) {
+        el.textContent = state.sortDirection === 'desc' ? '▼' : '▲';
+      } else {
+        el.textContent = '';
+      }
+    }
+  });
 }
 
 
 // ── Tab Management ──────────────────────────────────────────────────────
 function switchTab(tabName) {
   state.activeTab = tabName;
+  
+  [tabPotentialBtn, tabQueueBtn, tabGoodBtn].forEach(b => b.classList.remove('active'));
+  [tabPotentialContent, tabQueueContent, tabGoodContent].forEach(c => c.classList.add('hidden'));
+
   if (tabName === 'potential') {
     tabPotentialBtn.classList.add('active');
-    tabQueueBtn.classList.remove('active');
     tabPotentialContent.classList.remove('hidden');
-    tabQueueContent.classList.add('hidden');
-  } else {
+  } else if (tabName === 'queue') {
     tabQueueBtn.classList.add('active');
-    tabPotentialBtn.classList.remove('active');
     tabQueueContent.classList.remove('hidden');
-    tabPotentialContent.classList.add('hidden');
+  } else if (tabName === 'good') {
+    tabGoodBtn.classList.add('active');
+    tabGoodContent.classList.remove('hidden');
   }
 }
 
@@ -83,8 +160,8 @@ async function fetchLeads() {
       return;
     }
     const data = await res.json();
-    // Handle both raw Array response and { leads: [...] } object wrapper
     state.leads = Array.isArray(data) ? data : (data.leads || []);
+    populateCategoryFilter();
     renderLeads();
   } catch (err) {
     showToast('Error loading leads: ' + err.message, 'error');
@@ -92,21 +169,105 @@ async function fetchLeads() {
 }
 
 
+function populateCategoryFilter() {
+  if (!filterCategory) return;
+  const currentVal = state.filters.category;
+  const categories = new Set();
+  state.leads.forEach(l => {
+    if (l.category && l.category.trim()) categories.add(l.category.trim());
+  });
+  const sortedCats = Array.from(categories).sort();
+  filterCategory.innerHTML = '<option value="">All Categories</option>' +
+    sortedCats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  filterCategory.value = currentVal;
+}
+
+
+function applyFiltersAndSort(leadList) {
+  return leadList.filter(l => {
+    // Text search (matches name, address, category, phone)
+    if (state.filters.search) {
+      const q = state.filters.search.toLowerCase();
+      const nameMatch = (l.name || '').toLowerCase().includes(q);
+      const addrMatch = (l.address || '').toLowerCase().includes(q);
+      const catMatch = (l.category || '').toLowerCase().includes(q);
+      const phoneMatch = (l.phone || '').toLowerCase().includes(q);
+      if (!nameMatch && !addrMatch && !catMatch && !phoneMatch) return false;
+    }
+
+    // Category filter
+    if (state.filters.category && (l.category || '') !== state.filters.category) {
+      return false;
+    }
+
+    // Site condition filter
+    if (state.filters.condition && (l.website_quality || 'none') !== state.filters.condition) {
+      return false;
+    }
+
+    // Minimum score filter
+    const score = l.lead_score || 0;
+    if (score < state.filters.minScore) {
+      return false;
+    }
+
+    return true;
+  }).sort((a, b) => {
+    let valA, valB;
+    if (state.sortColumn === 'score') {
+      valA = a.lead_score || 0;
+      valB = b.lead_score || 0;
+    } else if (state.sortColumn === 'date') {
+      valA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      valB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    } else if (state.sortColumn === 'name') {
+      valA = (a.name || '').toLowerCase();
+      valB = (b.name || '').toLowerCase();
+      return state.sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    }
+
+    if (state.sortDirection === 'asc') {
+      return valA > valB ? 1 : valA < valB ? -1 : 0;
+    } else {
+      return valA < valB ? 1 : valA > valB ? -1 : 0;
+    }
+  });
+}
+
+
 function renderLeads() {
-  // Filter leads by send_status and kit presence
-  const potentialLeads = state.leads.filter(l => 
-    l.send_status !== 'sent' && l.send_status !== 'unsubscribed' && (!l.pitch_body || l.pitch_body.trim() === '')
+  // 1. Separate into raw categories
+  // Potential: website_quality != 'good', not sent, no kit
+  const rawPotential = state.leads.filter(l => 
+    (l.website_quality || 'none') !== 'good' &&
+    l.send_status !== 'sent' && l.send_status !== 'unsubscribed' &&
+    (!l.pitch_body || l.pitch_body.trim() === '')
   );
 
-  const queueLeads = state.leads.filter(l => 
-    l.send_status !== 'sent' && l.send_status !== 'unsubscribed' && l.pitch_body && l.pitch_body.trim() !== ''
+  // Queue: website_quality != 'good', not sent, kit ready
+  const rawQueue = state.leads.filter(l => 
+    (l.website_quality || 'none') !== 'good' &&
+    l.send_status !== 'sent' && l.send_status !== 'unsubscribed' &&
+    l.pitch_body && l.pitch_body.trim() !== ''
   );
 
-  badgePotential.textContent = potentialLeads.length;
-  badgeQueue.textContent = queueLeads.length;
+  // Good sites / Non-prospects: website_quality == 'good'
+  const rawGood = state.leads.filter(l => (l.website_quality || 'none') === 'good');
 
-  renderPotentialTable(potentialLeads);
-  renderQueueCards(queueLeads);
+  // 2. Apply composable filters and sort
+  const filteredPotential = applyFiltersAndSort(rawPotential);
+  const filteredQueue = applyFiltersAndSort(rawQueue);
+  const filteredGood = applyFiltersAndSort(rawGood);
+
+  // 3. Update badges to show filtered count
+  badgePotential.textContent = filteredPotential.length;
+  badgeQueue.textContent = filteredQueue.length;
+  badgeGood.textContent = filteredGood.length;
+
+  // 4. Render tables/cards
+  renderPotentialTable(filteredPotential);
+  renderQueueCards(filteredQueue);
+  renderGoodTable(filteredGood);
 }
 
 
@@ -114,8 +275,8 @@ function renderPotentialTable(leads) {
   if (leads.length === 0) {
     potentialTableBody.innerHTML = `
       <tr>
-        <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
-          No uncontacted businesses in queue. Discover new leads using the search panel above!
+        <td colspan="7" style="text-align:center; padding:36px; color:var(--text-muted);">
+          No prospect businesses match current filters. Adjust search or filters above!
         </td>
       </tr>
     `;
@@ -126,7 +287,11 @@ function renderPotentialTable(leads) {
     const condition = l.website_quality || 'none';
     let stampClass = 'stamp--rust';
     if (condition === 'outdated') stampClass = 'stamp--amber';
-    if (condition === 'good') stampClass = 'stamp--teal';
+
+    const score = l.lead_score || 0;
+    let scoreStamp = 'stamp--rust';
+    if (score >= 70) scoreStamp = 'stamp--teal';
+    else if (score >= 40) scoreStamp = 'stamp--amber';
 
     const dateStr = l.created_at ? new Date(l.created_at).toLocaleDateString() : '—';
 
@@ -141,6 +306,9 @@ function renderPotentialTable(leads) {
         <td>
           <span class="stamp ${stampClass}">${condition.toUpperCase()}</span>
         </td>
+        <td>
+          <span class="stamp ${scoreStamp}">${score}/100</span>
+        </td>
         <td class="mono" style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
         <td style="text-align:right;">
           <button class="btn btn--sm" onclick="buildOutreachKit('${l.place_id}')">
@@ -153,11 +321,52 @@ function renderPotentialTable(leads) {
 }
 
 
+function renderGoodTable(leads) {
+  if (leads.length === 0) {
+    goodTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
+          No businesses with good websites match current filters.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  goodTableBody.innerHTML = leads.map(l => {
+    const score = l.lead_score || 0;
+    let scoreStamp = 'stamp--rust';
+    if (score >= 70) scoreStamp = 'stamp--teal';
+    else if (score >= 40) scoreStamp = 'stamp--amber';
+
+    const dateStr = l.created_at ? new Date(l.created_at).toLocaleDateString() : '—';
+
+    return `
+      <tr>
+        <td>
+          <strong style="color:var(--text-ink);">${escapeHtml(l.name || 'Unnamed Business')}</strong>
+          ${l.phone ? `<div class="mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">${escapeHtml(l.phone)}</div>` : ''}
+        </td>
+        <td style="color:var(--text-muted);">${escapeHtml(l.category || 'Local Business')}</td>
+        <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(l.address || '—')}</td>
+        <td style="font-size:12px;">
+          ${l.website ? `<a href="${escapeHtml(l.website)}" target="_blank" style="color:var(--accent-teal); text-decoration:none;">${escapeHtml(l.website.replace(/^https?:\/\//, ''))}</a>` : '—'}
+        </td>
+        <td>
+          <span class="stamp ${scoreStamp}">${score}/100</span>
+        </td>
+        <td class="mono" style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+
 function renderQueueCards(leads) {
   if (leads.length === 0) {
     queueList.innerHTML = `
       <div style="text-align:center; padding:48px; color:var(--text-muted);">
-        No outreach kits ready in queue. Click <b>"Build Kit"</b> on any lead in Potential Businesses!
+        No outreach kits match current filters. Adjust filters or click <b>"Build Kit"</b> on a lead!
       </div>
     `;
     return;
@@ -170,13 +379,21 @@ function renderQueueCards(leads) {
     const prompt = l.mockup_prompt || '';
     const analysis = l.analysis || 'Analysis pending.';
 
+    const score = l.lead_score || 0;
+    let scoreStamp = 'stamp--rust';
+    if (score >= 70) scoreStamp = 'stamp--teal';
+    else if (score >= 40) scoreStamp = 'stamp--amber';
+
     const mailtoUrl = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
     return `
       <div class="queue-card" id="card-${l.place_id}">
         <div class="queue-card__header">
           <div>
-            <div class="queue-card__title">${escapeHtml(l.name || 'Unnamed Business')}</div>
+            <div class="queue-card__title" style="display:flex; align-items:center; gap:10px;">
+              <span>${escapeHtml(l.name || 'Unnamed Business')}</span>
+              <span class="stamp ${scoreStamp}">${score}/100</span>
+            </div>
             <div class="queue-card__meta">
               ${l.category ? escapeHtml(l.category) + ' &bull; ' : ''}
               ${l.email ? `📧 <span style="color:var(--accent-teal-dark);">${escapeHtml(l.email)}</span>` : '<span style="color:var(--stamp-rust);">No email found</span>'}
