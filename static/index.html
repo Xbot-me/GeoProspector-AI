@@ -82,6 +82,37 @@
       <div id="eventFeed" class="mono" style="font-size:12px; background:var(--bg-paper); border:1px solid var(--border-hairline); padding:8px 12px; max-height:160px; overflow-y:auto; line-height:1.6;"></div>
     </section>
 
+    <!-- ── Composable Filter Bar ───────────────────────────────── -->
+    <section class="ledger-panel" style="padding:14px 20px; margin-bottom:16px;">
+      <div style="display:grid; grid-template-columns: 2fr 1.5fr 1.2fr 1fr auto; gap:12px; align-items:end;">
+        <div class="form-group">
+          <label for="filterSearch">Text Search</label>
+          <input type="text" id="filterSearch" placeholder="Filter by name, city, or address...">
+        </div>
+        <div class="form-group">
+          <label for="filterCategory">Category</label>
+          <select id="filterCategory" style="font-family:var(--font-body); font-size:13px; color:var(--text-ink); background:var(--bg-paper); border:1px solid var(--border-hairline); border-radius:var(--radius-sm); padding:8px 12px; outline:none;">
+            <option value="">All Categories</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="filterCondition">Site Condition</label>
+          <select id="filterCondition" style="font-family:var(--font-body); font-size:13px; color:var(--text-ink); background:var(--bg-paper); border:1px solid var(--border-hairline); border-radius:var(--radius-sm); padding:8px 12px; outline:none;">
+            <option value="">All Conditions</option>
+            <option value="none">No Site (None)</option>
+            <option value="dead">Dead Site</option>
+            <option value="social_only">Social Only</option>
+            <option value="outdated">Outdated Site</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="filterMinScore">Min Score (0-100)</label>
+          <input type="number" id="filterMinScore" value="0" min="0" max="100" placeholder="0">
+        </div>
+        <button type="button" id="resetFiltersBtn" class="btn btn--outline btn--sm" style="height:36px;">Reset</button>
+      </div>
+    </section>
+
     <!-- ── Manila Folder Tabs Navigation ─────────────────────── -->
     <div class="tab-container">
       <div class="manila-tabs">
@@ -93,6 +124,10 @@
           <span>Review & Send Queue</span>
           <span class="tab-badge" id="badgeQueue">0</span>
         </div>
+        <div class="manila-tab" id="tabGoodBtn">
+          <span>Good Sites / Non-Prospects</span>
+          <span class="tab-badge" id="badgeGood">0</span>
+        </div>
       </div>
 
       <!-- Tab 1: Potential Businesses -->
@@ -101,18 +136,19 @@
           <table class="ledger-table">
             <thead>
               <tr>
-                <th>Business Name</th>
+                <th class="sortable" data-sort="name" style="cursor:pointer;">Business Name <span id="sort-indicator-name" class="mono"></span></th>
                 <th>Category</th>
                 <th>Location / Address</th>
                 <th>Site Condition</th>
-                <th>Date Discovered</th>
+                <th class="sortable" data-sort="score" style="cursor:pointer;">Score <span id="sort-indicator-score" class="mono">▼</span></th>
+                <th class="sortable" data-sort="date" style="cursor:pointer;">Date Discovered <span id="sort-indicator-date" class="mono"></span></th>
                 <th style="text-align:right;">Action</th>
               </tr>
             </thead>
             <tbody id="potentialTableBody">
               <tr>
-                <td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
-                  No uncontacted businesses discovered yet. Run a search above!
+                <td colspan="7" style="text-align:center; padding:32px; color:var(--text-muted);">
+                  No uncontacted prospect businesses discovered yet. Run a search above!
                 </td>
               </tr>
             </tbody>
@@ -126,6 +162,31 @@
           <div style="text-align:center; padding:40px; color:var(--text-muted);">
             No outreach kits in queue. Click "Build Outreach Kit" on any lead in Potential Businesses!
           </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Good Sites / Non-Prospects -->
+      <div class="tab-content hidden" id="tabGoodContent">
+        <div id="goodTableWrapper">
+          <table class="ledger-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="name" style="cursor:pointer;">Business Name</th>
+                <th>Category</th>
+                <th>Location / Address</th>
+                <th>Website URL</th>
+                <th class="sortable" data-sort="score" style="cursor:pointer;">Score</th>
+                <th class="sortable" data-sort="date" style="cursor:pointer;">Date Discovered</th>
+              </tr>
+            </thead>
+            <tbody id="goodTableBody">
+              <tr>
+                <td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted);">
+                  No businesses with good websites found yet.
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
