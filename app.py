@@ -496,6 +496,8 @@ def _broadcast(run_id: str, event: dict):
     """Send an event to all WebSocket clients for this run."""
     run = _runs.get(run_id)
     if run:
+        if "events" not in run:
+            run["events"] = []
         run["events"].append(event)
 
     clients = _ws_clients.get(run_id, [])
