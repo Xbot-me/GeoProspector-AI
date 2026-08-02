@@ -59,7 +59,7 @@
           <label for="maxResults">Max Leads</label>
           <input type="number" id="maxResults" value="15" min="1" max="20">
         </div>
-        <div style="display: flex; gap: 8px;">
+        <div class="search-form-actions" style="display: flex; gap: 8px;">
           <button type="button" class="btn btn--outline" id="exportBtn" title="Export CSV">
             CSV
           </button>
@@ -84,7 +84,7 @@
 
     <!-- ── Composable Filter Bar ───────────────────────────────── -->
     <section class="ledger-panel" style="padding:14px 20px; margin-bottom:16px;">
-      <div style="display:grid; grid-template-columns: 2fr 1.5fr 1.2fr 1fr auto; gap:12px; align-items:end;">
+      <div class="filter-bar-grid">
         <div class="form-group">
           <label for="filterSearch">Text Search</label>
           <input type="text" id="filterSearch" placeholder="Filter by name, city, or address...">
@@ -132,7 +132,7 @@
 
       <!-- Tab 1: Potential Businesses -->
       <div class="tab-content" id="tabPotentialContent">
-        <div id="potentialTableWrapper">
+        <div id="potentialTableWrapper" class="table-wrapper">
           <table class="ledger-table">
             <thead>
               <tr>
@@ -154,6 +154,7 @@
             </tbody>
           </table>
         </div>
+        <div id="potentialPagination" class="pagination-bar"></div>
       </div>
 
       <!-- Tab 2: Review & Send Queue -->
@@ -163,11 +164,12 @@
             No outreach kits in queue. Click "Build Outreach Kit" on any lead in Potential Businesses!
           </div>
         </div>
+        <div id="queuePagination" class="pagination-bar"></div>
       </div>
 
       <!-- Tab 3: Good Sites / Non-Prospects -->
       <div class="tab-content hidden" id="tabGoodContent">
-        <div id="goodTableWrapper">
+        <div id="goodTableWrapper" class="table-wrapper">
           <table class="ledger-table">
             <thead>
               <tr>
@@ -188,6 +190,7 @@
             </tbody>
           </table>
         </div>
+        <div id="goodPagination" class="pagination-bar"></div>
       </div>
     </div>
 

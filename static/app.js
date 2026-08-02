@@ -9,6 +9,8 @@ let state = {
   ws: null,
   sortColumn: 'score', // 'score' | 'date' | 'name'
   sortDirection: 'desc', // 'desc' | 'asc'
+  currentPage: 1,
+  pageSize: 25, // default 25 per page
   filters: {
     search: '',
     category: '',
@@ -78,11 +80,11 @@ function setupEventListeners() {
   suggestBtn.addEventListener('click', handleSuggestTarget);
   logoutBtn.addEventListener('click', handleLogout);
 
-  // Filters
-  filterSearch.addEventListener('input', (e) => { state.filters.search = e.target.value; renderLeads(); });
-  filterCategory.addEventListener('change', (e) => { state.filters.category = e.target.value; renderLeads(); });
-  filterCondition.addEventListener('change', (e) => { state.filters.condition = e.target.value; renderLeads(); });
-  filterMinScore.addEventListener('input', (e) => { state.filters.minScore = parseInt(e.target.value) || 0; renderLeads(); });
+  // Filters (reset to Page 1 on change)
+  filterSearch.addEventListener('input', (e) => { state.filters.search = e.target.value; state.currentPage = 1; renderLeads(); });
+  filterCategory.addEventListener('change', (e) => { state.filters.category = e.target.value; state.currentPage = 1; renderLeads(); });
+  filterCondition.addEventListener('change', (e) => { state.filters.condition = e.target.value; state.currentPage = 1; renderLeads(); });
+  filterMinScore.addEventListener('input', (e) => { state.filters.minScore = parseInt(e.target.value) || 0; state.currentPage = 1; renderLeads(); });
   resetFiltersBtn.addEventListener('click', resetFilters);
 
   // Table Column Sort Headers
@@ -95,6 +97,7 @@ function setupEventListeners() {
         state.sortColumn = col;
         state.sortDirection = 'desc';
       }
+      state.currentPage = 1;
       updateSortIndicators();
       renderLeads();
     });
@@ -107,6 +110,7 @@ function resetFilters() {
   state.filters.category = '';
   state.filters.condition = '';
   state.filters.minScore = 0;
+  state.currentPage = 1;
 
   filterSearch.value = '';
   filterCategory.value = '';
@@ -133,6 +137,9 @@ function updateSortIndicators() {
 
 // ── Tab Management ──────────────────────────────────────────────────────
 function switchTab(tabName) {
+  if (state.activeTab !== tabName) {
+    state.currentPage = 1;
+  }
   state.activeTab = tabName;
   
   [tabPotentialBtn, tabQueueBtn, tabGoodBtn].forEach(b => b.classList.remove('active'));
@@ -148,6 +155,59 @@ function switchTab(tabName) {
     tabGoodBtn.classList.add('active');
     tabGoodContent.classList.remove('hidden');
   }
+  renderLeads();
+}
+
+
+// ── Pagination Engine ───────────────────────────────────────────────────
+function goToPage(page) {
+  state.currentPage = page;
+  renderLeads();
+  window.scrollTo({ top: 400, behavior: 'smooth' });
+}
+
+function changePageSize(size) {
+  state.pageSize = parseInt(size) || 25;
+  state.currentPage = 1;
+  renderLeads();
+}
+
+function renderPagination(totalItems, elementId, isActiveTab) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (totalItems === 0) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const totalPages = Math.ceil(totalItems / state.pageSize) || 1;
+  const currentPage = isActiveTab ? Math.min(Math.max(1, state.currentPage), totalPages) : 1;
+  const startIndex = totalItems === 0 ? 0 : (currentPage - 1) * state.pageSize + 1;
+  const endIndex = Math.min(currentPage * state.pageSize, totalItems);
+
+  el.innerHTML = `
+    <div class="pagination-info">
+      Showing <strong>${startIndex}–${endIndex}</strong> of <strong>${totalItems}</strong> leads
+    </div>
+    <div class="pagination-controls">
+      <label class="pagination-size-label">
+        Per page:
+        <select class="pagination-size-select" onchange="changePageSize(this.value)">
+          <option value="25" ${state.pageSize === 25 ? 'selected' : ''}>25</option>
+          <option value="50" ${state.pageSize === 50 ? 'selected' : ''}>50</option>
+          <option value="100" ${state.pageSize === 100 ? 'selected' : ''}>100</option>
+          <option value="250" ${state.pageSize === 250 ? 'selected' : ''}>250</option>
+        </select>
+      </label>
+      <div class="pagination-pages">
+        <button class="btn btn--outline btn--sm" onclick="goToPage(1)" ${currentPage === 1 ? 'disabled' : ''}>« First</button>
+        <button class="btn btn--outline btn--sm" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>‹ Prev</button>
+        <span class="pagination-page-num mono">Page ${currentPage} of ${totalPages}</span>
+        <button class="btn btn--outline btn--sm" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next ›</button>
+        <button class="btn btn--outline btn--sm" onclick="goToPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}>Last »</button>
+      </div>
+    </div>
+  `;
 }
 
 
@@ -237,21 +297,18 @@ function applyFiltersAndSort(leadList) {
 
 function renderLeads() {
   // 1. Separate into raw categories
-  // Potential: website_quality != 'good', not sent, no kit
   const rawPotential = state.leads.filter(l => 
     (l.website_quality || 'none') !== 'good' &&
     l.send_status !== 'sent' && l.send_status !== 'unsubscribed' &&
     (!l.pitch_body || l.pitch_body.trim() === '')
   );
 
-  // Queue: website_quality != 'good', not sent, kit ready
   const rawQueue = state.leads.filter(l => 
     (l.website_quality || 'none') !== 'good' &&
     l.send_status !== 'sent' && l.send_status !== 'unsubscribed' &&
     l.pitch_body && l.pitch_body.trim() !== ''
   );
 
-  // Good sites / Non-prospects: website_quality == 'good'
   const rawGood = state.leads.filter(l => (l.website_quality || 'none') === 'good');
 
   // 2. Apply composable filters and sort
@@ -264,10 +321,29 @@ function renderLeads() {
   badgeQueue.textContent = filteredQueue.length;
   badgeGood.textContent = filteredGood.length;
 
-  // 4. Render tables/cards
-  renderPotentialTable(filteredPotential);
-  renderQueueCards(filteredQueue);
-  renderGoodTable(filteredGood);
+  // 4. Calculate pagination slicing for active vs inactive tabs
+  const getPagedSlice = (items, tabKey) => {
+    if (state.activeTab !== tabKey) return items.slice(0, state.pageSize);
+    const totalPages = Math.ceil(items.length / state.pageSize) || 1;
+    if (state.currentPage > totalPages) state.currentPage = totalPages;
+    if (state.currentPage < 1) state.currentPage = 1;
+    const start = (state.currentPage - 1) * state.pageSize;
+    return items.slice(start, start + state.pageSize);
+  };
+
+  const pagedPotential = getPagedSlice(filteredPotential, 'potential');
+  const pagedQueue = getPagedSlice(filteredQueue, 'queue');
+  const pagedGood = getPagedSlice(filteredGood, 'good');
+
+  // 5. Render tables/cards
+  renderPotentialTable(pagedPotential);
+  renderQueueCards(pagedQueue);
+  renderGoodTable(pagedGood);
+
+  // 6. Render pagination bars
+  renderPagination(filteredPotential.length, 'potentialPagination', state.activeTab === 'potential');
+  renderPagination(filteredQueue.length, 'queuePagination', state.activeTab === 'queue');
+  renderPagination(filteredGood.length, 'goodPagination', state.activeTab === 'good');
 }
 
 
