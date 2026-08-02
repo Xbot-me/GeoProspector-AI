@@ -683,7 +683,7 @@ async function handleSuggestTarget() {
     if (data.location) {
       queryInput.value = data.query || 'local businesses';
       locationInput.value = data.location;
-      showToast(`Suggested: ${data.location}`, 'info');
+      showToast(`Suggested: "${data.query || 'local businesses'}" in ${data.location}`, 'info');
     }
   } catch (err) {
     showToast('Failed to get suggestion', 'error');
