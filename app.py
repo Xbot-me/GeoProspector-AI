@@ -401,10 +401,14 @@ async def build_outreach_kit_endpoint(place_id: str):
     if not biz:
         return Response(status_code=404, content="Lead not found")
     
-    kit = generate_outreach_kit(biz)
-    biz.update(kit)
-    upsert_business(biz)
-    return biz
+    try:
+        kit = generate_outreach_kit(biz)
+        biz.update(kit)
+        upsert_business(biz)
+        return biz
+    except Exception as e:
+        logger.error(f"Error generating outreach kit for {place_id}: {e}")
+        return Response(status_code=500, content=f"Error generating kit: {str(e)}")
 
 
 @app.post("/api/leads/{place_id}/status")
