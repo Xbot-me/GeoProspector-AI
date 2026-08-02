@@ -1,0 +1,1849 @@
+{
+  "targets": [
+    {
+      "name": "Celina",
+      "region": "TX",
+      "country": "USA",
+      "population": "~45,000",
+      "growth_signal": "Fastest-growing city in the US, 2nd year running — 24.6% surge",
+      "cluster_group": "DFW-North (Celina/Prosper/Anna/Melissa)",
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "trades"
+      ],
+      "notes": "US Census Bureau, top 5 fastest-growing cities 20k+",
+      "tab": "USA"
+    },
+    {
+      "name": "Princeton",
+      "region": "TX",
+      "country": "USA",
+      "population": "~28,000",
+      "growth_signal": "#1 nationwide, 30%+ YoY growth",
+      "cluster_group": "DFW-North (Celina/Prosper/Anna/Melissa)",
+      "suggested_niches": [
+        "Landscaping",
+        "plumbing",
+        "daycare"
+      ],
+      "notes": "Kitchingco/Census Vintage 2025",
+      "tab": "USA"
+    },
+    {
+      "name": "Anna",
+      "region": "TX",
+      "country": "USA",
+      "population": "~20,000",
+      "growth_signal": "Collin County growth corridor",
+      "cluster_group": "DFW-North (Celina/Prosper/Anna/Melissa)",
+      "suggested_niches": [
+        "Home services",
+        "tutoring"
+      ],
+      "notes": "Same corridor as Celina/Melissa/Princeton",
+      "tab": "USA"
+    },
+    {
+      "name": "Prosper",
+      "region": "TX",
+      "country": "USA",
+      "population": "~35,000",
+      "growth_signal": "Fastest-growing wealthy suburb (GoBankingRates)",
+      "cluster_group": "DFW-North (Celina/Prosper/Anna/Melissa)",
+      "suggested_niches": [
+        "Salons",
+        "home services",
+        "landscaping"
+      ],
+      "notes": "Luxury-tier, higher price point than Celina",
+      "tab": "USA"
+    },
+    {
+      "name": "Melissa",
+      "region": "TX",
+      "country": "USA",
+      "population": "~32,000",
+      "growth_signal": "10.17%/yr growth, +124% since 2020",
+      "cluster_group": "DFW-North (Celina/Prosper/Anna/Melissa)",
+      "suggested_niches": [
+        "Home services",
+        "tutoring",
+        "salons"
+      ],
+      "notes": "River Journal DFW suburb report",
+      "tab": "USA"
+    },
+    {
+      "name": "Fate",
+      "region": "TX",
+      "country": "USA",
+      "population": "~27,000",
+      "growth_signal": "11.4% growth, east of Rockwall",
+      "cluster_group": "DFW-East (Fate/Royse City/Rockwall)",
+      "suggested_niches": [
+        "Landscaping",
+        "plumbing",
+        "daycare"
+      ],
+      "notes": "River Journal 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Royse City",
+      "region": "TX",
+      "country": "USA",
+      "population": "~15,000",
+      "growth_signal": "Part of Rockwall growth corridor, median home <$335k",
+      "cluster_group": "DFW-East (Fate/Royse City/Rockwall)",
+      "suggested_niches": [
+        "Trades",
+        "home services"
+      ],
+      "notes": "River Journal 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Forney",
+      "region": "TX",
+      "country": "USA",
+      "population": "~35,000",
+      "growth_signal": "8.5% growth",
+      "cluster_group": "DFW-East (Fate/Royse City/Rockwall)",
+      "suggested_niches": [
+        "Landscaping",
+        "handyman",
+        "daycare"
+      ],
+      "notes": "Comparable to Eagle Mountain, UT",
+      "tab": "USA"
+    },
+    {
+      "name": "Caddo Mills",
+      "region": "TX",
+      "country": "USA",
+      "population": "~2,500",
+      "growth_signal": "16.36% annualized growth — Texas's fastest",
+      "cluster_group": "DFW-East (Fate/Royse City/Rockwall)",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Josephine",
+      "region": "TX",
+      "country": "USA",
+      "population": "~3,500",
+      "growth_signal": "16.02% annualized growth",
+      "cluster_group": "DFW-East (Fate/Royse City/Rockwall)",
+      "suggested_niches": [
+        "Home services",
+        "landscaping"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Liberty Hill",
+      "region": "TX",
+      "country": "USA",
+      "population": "~12,000",
+      "growth_signal": "15.47% annualized growth",
+      "cluster_group": "Austin-North (Georgetown/Leander/Liberty Hill)",
+      "suggested_niches": [
+        "Trades",
+        "home services"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Georgetown",
+      "region": "TX",
+      "country": "USA",
+      "population": "~92,000",
+      "growth_signal": "Fast-growing Austin exurb",
+      "cluster_group": "Austin-North (Georgetown/Leander/Liberty Hill)",
+      "suggested_niches": [
+        "HVAC",
+        "plumbing",
+        "roofing",
+        "landscaping"
+      ],
+      "notes": "GOBankingRates 2025 fast-growth suburb list",
+      "tab": "USA"
+    },
+    {
+      "name": "Leander",
+      "region": "TX",
+      "country": "USA",
+      "population": "~75,000",
+      "growth_signal": "Fast-growing Austin exurb",
+      "cluster_group": "Austin-North (Georgetown/Leander/Liberty Hill)",
+      "suggested_niches": [
+        "Pool/lawn care",
+        "plumbing",
+        "salons"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Hutto",
+      "region": "TX",
+      "country": "USA",
+      "population": "~40,000",
+      "growth_signal": "Fast-growing Austin exurb",
+      "cluster_group": "Austin-North (Georgetown/Leander/Liberty Hill)",
+      "suggested_niches": [
+        "Home services",
+        "tutoring",
+        "salons"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Kyle",
+      "region": "TX",
+      "country": "USA",
+      "population": "~65,000",
+      "growth_signal": "Fast-growing Austin exurb",
+      "cluster_group": "Austin-South",
+      "suggested_niches": [
+        "Auto repair",
+        "pest control",
+        "cleaning"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "New Braunfels",
+      "region": "TX",
+      "country": "USA",
+      "population": "~110,000",
+      "growth_signal": "Fast-growing Austin/San Antonio corridor",
+      "cluster_group": "Austin-South",
+      "suggested_niches": [
+        "Home services",
+        "auto repair",
+        "pest control"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Boerne",
+      "region": "TX",
+      "country": "USA",
+      "population": "~20,000",
+      "growth_signal": "Top in-demand suburb (MoveBuddha 2026)",
+      "cluster_group": "Austin-South",
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "home services"
+      ],
+      "notes": "San Antonio-adjacent",
+      "tab": "USA"
+    },
+    {
+      "name": "Waxahachie",
+      "region": "TX",
+      "country": "USA",
+      "population": "~45,000",
+      "growth_signal": "Fast-growing Dallas exurb",
+      "cluster_group": "Dallas-South (Waxahachie/Midlothian)",
+      "suggested_niches": [
+        "Landscaping",
+        "handyman",
+        "HVAC"
+      ],
+      "notes": "2025 affordable fast-growth list",
+      "tab": "USA"
+    },
+    {
+      "name": "Midlothian",
+      "region": "TX",
+      "country": "USA",
+      "population": "~40,000",
+      "growth_signal": "Fast-growing Dallas exurb",
+      "cluster_group": "Dallas-South (Waxahachie/Midlothian)",
+      "suggested_niches": [
+        "HVAC",
+        "pest control",
+        "cleaning"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Lewisville",
+      "region": "TX",
+      "country": "USA",
+      "population": "~115,000",
+      "growth_signal": "DFW affordable fast-growth suburb",
+      "cluster_group": "DFW-Northwest (Lewisville/Little Elm)",
+      "suggested_niches": [
+        "Home services",
+        "auto repair"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Little Elm",
+      "region": "TX",
+      "country": "USA",
+      "population": "~55,000",
+      "growth_signal": "DFW affordable fast-growth suburb",
+      "cluster_group": "DFW-Northwest (Lewisville/Little Elm)",
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "salons"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Weatherford",
+      "region": "TX",
+      "country": "USA",
+      "population": "~35,000",
+      "growth_signal": "Fast-growing Fort Worth exurb",
+      "cluster_group": "Fort Worth-West",
+      "suggested_niches": [
+        "Auto repair",
+        "trades",
+        "salons"
+      ],
+      "notes": "2025 affordable fast-growth list",
+      "tab": "USA"
+    },
+    {
+      "name": "Conroe",
+      "region": "TX",
+      "country": "USA",
+      "population": "~115,000",
+      "growth_signal": "Fast-growing Houston exurb",
+      "cluster_group": "Houston-North (Conroe/Atascocita)",
+      "suggested_niches": [
+        "HVAC",
+        "roofing",
+        "landscaping"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Atascocita",
+      "region": "TX",
+      "country": "USA",
+      "population": "~75,000",
+      "growth_signal": "Houston-area fast-growth suburb",
+      "cluster_group": "Houston-North (Conroe/Atascocita)",
+      "suggested_niches": [
+        "Home services",
+        "auto repair"
+      ],
+      "notes": "#2 on affordable fast-growth list",
+      "tab": "USA"
+    },
+    {
+      "name": "Fulshear",
+      "region": "TX",
+      "country": "USA",
+      "population": "~54,000",
+      "growth_signal": "736% growth 2015-2023 — Houston-west remote-work boom",
+      "cluster_group": "Houston-West",
+      "suggested_niches": [
+        "Home services",
+        "landscaping",
+        "salons"
+      ],
+      "notes": "southhillenterprise.com 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Glenn Heights",
+      "region": "TX",
+      "country": "USA",
+      "population": "~21,600",
+      "growth_signal": "5.03% growth",
+      "cluster_group": "DFW-South",
+      "suggested_niches": [
+        "Trades",
+        "home services"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Haines City",
+      "region": "FL",
+      "country": "USA",
+      "population": "~35,000",
+      "growth_signal": "~10% annual growth — FL's fastest-growing city 2026",
+      "cluster_group": "I-4 Corridor (Haines City)",
+      "suggested_niches": [
+        "Trades",
+        "pest control",
+        "auto repair"
+      ],
+      "notes": "Between Orlando/Tampa",
+      "tab": "USA"
+    },
+    {
+      "name": "North Port",
+      "region": "FL",
+      "country": "USA",
+      "population": "~101,500",
+      "growth_signal": "5.07% growth",
+      "cluster_group": "SW Florida (North Port/Naples)",
+      "suggested_niches": [
+        "HVAC",
+        "roofing",
+        "landscaping"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Naples",
+      "region": "FL",
+      "country": "USA",
+      "population": "~22,000 (city) / ~400k metro",
+      "growth_signal": "Well-known growth/holiday destination",
+      "cluster_group": "SW Florida (North Port/Naples)",
+      "suggested_niches": [
+        "Hospitality",
+        "home services",
+        "landscaping"
+      ],
+      "notes": "US News top 25 fastest-growing 2026-27",
+      "tab": "USA"
+    },
+    {
+      "name": "Wesley Chapel",
+      "region": "FL",
+      "country": "USA",
+      "population": "~65,000",
+      "growth_signal": "Fast-growing Tampa suburb",
+      "cluster_group": "Tampa-North (Wesley Chapel/Sun City Center/Apollo Beach/Ruskin)",
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "cleaning"
+      ],
+      "notes": "2025 affordable fast-growth suburb list",
+      "tab": "USA"
+    },
+    {
+      "name": "Apollo Beach",
+      "region": "FL",
+      "country": "USA",
+      "population": "~30,000",
+      "growth_signal": "Fast-growing Tampa suburb",
+      "cluster_group": "Tampa-North (Wesley Chapel/Sun City Center/Apollo Beach/Ruskin)",
+      "suggested_niches": [
+        "Landscaping",
+        "pool service",
+        "pest control"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Sun City Center",
+      "region": "FL",
+      "country": "USA",
+      "population": "~30,000",
+      "growth_signal": "Fast-growing Tampa suburb",
+      "cluster_group": "Tampa-North (Wesley Chapel/Sun City Center/Apollo Beach/Ruskin)",
+      "suggested_niches": [
+        "Home services",
+        "handyman"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Ruskin",
+      "region": "FL",
+      "country": "USA",
+      "population": "~30,000",
+      "growth_signal": "Fast-growing Tampa suburb",
+      "cluster_group": "Tampa-North (Wesley Chapel/Sun City Center/Apollo Beach/Ruskin)",
+      "suggested_niches": [
+        "Trades",
+        "auto repair"
+      ],
+      "notes": "Same list",
+      "tab": "USA"
+    },
+    {
+      "name": "Stockbridge",
+      "region": "GA",
+      "country": "USA",
+      "population": "~35,000",
+      "growth_signal": "#1 fastest-growing affordable suburb 2025",
+      "cluster_group": "Atlanta-South",
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "auto repair"
+      ],
+      "notes": "GOBankingRates 2025 study",
+      "tab": "USA"
+    },
+    {
+      "name": "Mableton",
+      "region": "GA",
+      "country": "USA",
+      "population": "~40,000",
+      "growth_signal": "82.6% annualized growth (mostly 2024 incorporation, not organic)",
+      "cluster_group": "Atlanta-West",
+      "suggested_niches": [
+        "Home services",
+        "cleaning",
+        "salons"
+      ],
+      "notes": "World Population Review 2026 — verify before relying on the stat",
+      "tab": "USA"
+    },
+    {
+      "name": "Hoschton",
+      "region": "GA",
+      "country": "USA",
+      "population": "~10,000",
+      "growth_signal": "12.85% annualized growth",
+      "cluster_group": "Atlanta-Northeast (Hoschton/Emerson)",
+      "suggested_niches": [
+        "Landscaping",
+        "trades",
+        "daycare"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Emerson",
+      "region": "GA",
+      "country": "USA",
+      "population": "~2,000",
+      "growth_signal": "7.86% annualized growth",
+      "cluster_group": "Atlanta-Northeast (Hoschton/Emerson)",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Wake Forest",
+      "region": "NC",
+      "country": "USA",
+      "population": "~56,000",
+      "growth_signal": "Most in-demand suburb in the US (MoveBuddha 2026)",
+      "cluster_group": "Raleigh-North (Wake Forest/Wendell)",
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "cleaning",
+        "tutoring"
+      ],
+      "notes": "Raleigh-adjacent",
+      "tab": "USA"
+    },
+    {
+      "name": "Wendell",
+      "region": "NC",
+      "country": "USA",
+      "population": "~10,000",
+      "growth_signal": "8.62% annualized growth — NC's fastest",
+      "cluster_group": "Raleigh-North (Wake Forest/Wendell)",
+      "suggested_niches": [
+        "Landscaping",
+        "handyman",
+        "daycare"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Fuquay-Varina",
+      "region": "NC",
+      "country": "USA",
+      "population": "~40,000",
+      "growth_signal": "Fast-growing Raleigh suburb",
+      "cluster_group": "Raleigh-South (Fuquay-Varina/Apex)",
+      "suggested_niches": [
+        "Home services",
+        "landscaping"
+      ],
+      "notes": "Consistently on NC fastest-growing list",
+      "tab": "USA"
+    },
+    {
+      "name": "Apex",
+      "region": "NC",
+      "country": "USA",
+      "population": "~75,000",
+      "growth_signal": "Fast-growing Raleigh suburb",
+      "cluster_group": "Raleigh-South (Fuquay-Varina/Apex)",
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "auto repair"
+      ],
+      "notes": "Same",
+      "tab": "USA"
+    },
+    {
+      "name": "Zebulon",
+      "region": "NC",
+      "country": "USA",
+      "population": "~8,500",
+      "growth_signal": "7.2% annualized growth",
+      "cluster_group": "Raleigh-East",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Leland",
+      "region": "NC",
+      "country": "USA",
+      "population": "~25,000",
+      "growth_signal": "Fast-growing Wilmington-area suburb",
+      "cluster_group": "Wilmington-area (Leland)",
+      "suggested_niches": [
+        "Home services",
+        "cleaning"
+      ],
+      "notes": "Coastal NC growth corridor",
+      "tab": "USA"
+    },
+    {
+      "name": "Calabash",
+      "region": "NC",
+      "country": "USA",
+      "population": "~2,800",
+      "growth_signal": "7.69% annualized growth",
+      "cluster_group": "Coastal NC/SC line (Calabash/Murrells Inlet)",
+      "suggested_niches": [
+        "Hospitality",
+        "home services"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Murrells Inlet",
+      "region": "SC",
+      "country": "USA",
+      "population": "~9,000",
+      "growth_signal": "Top in-demand coastal suburb (MoveBuddha 2026)",
+      "cluster_group": "Coastal NC/SC line (Calabash/Murrells Inlet)",
+      "suggested_niches": [
+        "Hospitality",
+        "home services"
+      ],
+      "notes": "Near Myrtle Beach",
+      "tab": "USA"
+    },
+    {
+      "name": "Fort Mill",
+      "region": "SC",
+      "country": "USA",
+      "population": "~28,000",
+      "growth_signal": "Fastest-growing city in Charlotte metro by %",
+      "cluster_group": "Charlotte-South (Fort Mill)",
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "trades"
+      ],
+      "notes": "Census Vintage 2025 via NC housing report",
+      "tab": "USA"
+    },
+    {
+      "name": "Hilton Head Island",
+      "region": "SC",
+      "country": "USA",
+      "population": "~40,000",
+      "growth_signal": "Holiday destination with steady growth",
+      "cluster_group": "Coastal SC (Hilton Head)",
+      "suggested_niches": [
+        "Hospitality",
+        "home services"
+      ],
+      "notes": "US News top 25 fastest-growing 2026-27",
+      "tab": "USA"
+    },
+    {
+      "name": "Queen Creek",
+      "region": "AZ",
+      "country": "USA",
+      "population": "~70,000",
+      "growth_signal": "6.4% annualized growth",
+      "cluster_group": "Phoenix-East (Queen Creek/San Tan Valley)",
+      "suggested_niches": [
+        "Landscaping",
+        "pool service",
+        "HVAC"
+      ],
+      "notes": "World Population Review 2026, #2 in AZ",
+      "tab": "USA"
+    },
+    {
+      "name": "San Tan Valley",
+      "region": "AZ",
+      "country": "USA",
+      "population": "~120,000 (unincorporated)",
+      "growth_signal": "Phoenix exurb growth corridor",
+      "cluster_group": "Phoenix-East (Queen Creek/San Tan Valley)",
+      "suggested_niches": [
+        "Home services",
+        "landscaping",
+        "salons"
+      ],
+      "notes": "Searchable directly on Google Maps",
+      "tab": "USA"
+    },
+    {
+      "name": "Coolidge",
+      "region": "AZ",
+      "country": "USA",
+      "population": "~15,000",
+      "growth_signal": "7.35% annualized growth — AZ's fastest",
+      "cluster_group": "Phoenix-South",
+      "suggested_niches": [
+        "Trades",
+        "auto repair"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Eloy",
+      "region": "AZ",
+      "country": "USA",
+      "population": "~21,000",
+      "growth_signal": "4.97% growth",
+      "cluster_group": "Phoenix-South (near Coolidge)",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "Colorado City",
+      "region": "AZ",
+      "country": "USA",
+      "population": "~5,000",
+      "growth_signal": "5.96% annualized growth",
+      "cluster_group": "Northern AZ (standalone)",
+      "suggested_niches": [
+        "Trades",
+        "home services"
+      ],
+      "notes": "World Population Review 2026",
+      "tab": "USA"
+    },
+    {
+      "name": "St. George",
+      "region": "UT",
+      "country": "USA",
+      "population": "~100,000 metro",
+      "growth_signal": "8.9% metro population rise, strong job growth",
+      "cluster_group": "Southern Utah (standalone)",
+      "suggested_niches": [
+        "Home services",
+        "landscaping",
+        "salons"
+      ],
+      "notes": "Attracts retirees + outdoor-lifestyle movers",
+      "tab": "USA"
+    },
+    {
+      "name": "Eagle Mountain",
+      "region": "UT",
+      "country": "USA",
+      "population": "~50,000",
+      "growth_signal": "8.5% growth, Wasatch Front boom",
+      "cluster_group": "Utah County-North (standalone)",
+      "suggested_niches": [
+        "Home services",
+        "trades",
+        "daycare"
+      ],
+      "notes": "Comparable growth rate to Forney, TX",
+      "tab": "USA"
+    },
+    {
+      "name": "Moncton",
+      "region": "NB",
+      "country": "Canada",
+      "population": "~196,000",
+      "growth_signal": "21.5-21.6% growth 2021-2025 — fastest-growing CMA in Canada",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "auto repair"
+      ],
+      "notes": "Statistics Canada Vintage/CMA data, 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Kelowna",
+      "region": "BC",
+      "country": "Canada",
+      "population": "~230,000 (CMA)",
+      "growth_signal": "9.7% growth 2021-2025",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Landscaping",
+        "cleaning",
+        "trades"
+      ],
+      "notes": "Statistics Canada via The Hub 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Saskatoon",
+      "region": "SK",
+      "country": "Canada",
+      "population": "~340,000 (CMA)",
+      "growth_signal": "15.3% growth 2021-2025",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "auto repair",
+        "salons"
+      ],
+      "notes": "Strong immigrant settlement growth",
+      "tab": "Canada"
+    },
+    {
+      "name": "Regina",
+      "region": "SK",
+      "country": "Canada",
+      "population": "~260,000 (CMA)",
+      "growth_signal": "13.1% growth 2021-2025",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "daycare"
+      ],
+      "notes": "Government sector + private growth",
+      "tab": "Canada"
+    },
+    {
+      "name": "Kitchener-Cambridge-Waterloo",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~700,000 (CMA)",
+      "growth_signal": "16.5% growth 2021-2025",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "tutoring",
+        "salons"
+      ],
+      "notes": "Tech/manufacturing hub",
+      "tab": "Canada"
+    },
+    {
+      "name": "London",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~633,000 (CMA)",
+      "growth_signal": "11.5% growth 2021-2025",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "auto repair",
+        "cleaning"
+      ],
+      "notes": "Statistics Canada 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Windsor",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~489,000 (CMA)",
+      "growth_signal": "11.2% growth 2021-2025",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "landscaping"
+      ],
+      "notes": "Statistics Canada 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Milton",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~175,000",
+      "growth_signal": "~4.2%/yr, doubling roughly every 17 years",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "trades",
+        "tutoring"
+      ],
+      "notes": "Top-ranked school board draw (HDSB)",
+      "tab": "Canada"
+    },
+    {
+      "name": "Ajax",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~130,000",
+      "growth_signal": "On Canada's fastest-growing-for-business list",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "cleaning",
+        "salons"
+      ],
+      "notes": "Calilio 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Oshawa",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~180,000",
+      "growth_signal": "On Canada's fastest-growing-for-business list",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "auto repair",
+        "salons"
+      ],
+      "notes": "Calilio 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Woodstock",
+      "region": "ON",
+      "country": "Canada",
+      "population": "~49,000",
+      "growth_signal": "12.35% growth 2018-2022",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "auto repair"
+      ],
+      "notes": "Calilio 2026 fastest-growing-cities report",
+      "tab": "Canada"
+    },
+    {
+      "name": "Winkler",
+      "region": "MB",
+      "country": "Canada",
+      "population": "~14,000",
+      "growth_signal": "Steady growth, affordable housing draw",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "Calilio 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Charlottetown",
+      "region": "PE",
+      "country": "Canada",
+      "population": "~40,000",
+      "growth_signal": "Consistently on Canada's fastest-growing list",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "cleaning"
+      ],
+      "notes": "Multiple 2026 rankings",
+      "tab": "Canada"
+    },
+    {
+      "name": "Whitehorse",
+      "region": "YT",
+      "country": "Canada",
+      "population": "~35,000",
+      "growth_signal": "On Canada's fastest-growing-for-business list",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "Calilio 2026",
+      "tab": "Canada"
+    },
+    {
+      "name": "Milton Keynes",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "15.5% population growth 2014-2024 (joint-fastest in UK)",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "cleaning",
+        "auto repair"
+      ],
+      "notes": "Statista/Centre for Cities 2026",
+      "tab": "UK"
+    },
+    {
+      "name": "Exeter",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "15.5% population growth 2014-2024",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "tutoring",
+        "salons"
+      ],
+      "notes": "Same source",
+      "tab": "UK"
+    },
+    {
+      "name": "Telford",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "14.9% population growth 2014-2024",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "auto repair"
+      ],
+      "notes": "Same source",
+      "tab": "UK"
+    },
+    {
+      "name": "Cambridge",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "14.5% population growth 2014-2024",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "tutoring",
+        "home services"
+      ],
+      "notes": "High-income market, but older/legacy sites still common",
+      "tab": "UK"
+    },
+    {
+      "name": "Peterborough",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "14.2% population growth; needs 19,400 more houses by 2036",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "landscaping",
+        "cleaning"
+      ],
+      "notes": "Same source + council housing forecast",
+      "tab": "UK"
+    },
+    {
+      "name": "Canterbury",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "#1 UK city for new retail/hospitality/construction business births per capita",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Hospitality",
+        "retail",
+        "construction trades"
+      ],
+      "notes": "metals4U UK business-growth index",
+      "tab": "UK"
+    },
+    {
+      "name": "Reading",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "2nd for new business births; among fastest-growing UK cities by economy",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "trades"
+      ],
+      "notes": "metals4U index + Red Flag Alert 2026",
+      "tab": "UK"
+    },
+    {
+      "name": "Leeds",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "#1 UK city for business growth 2026 (38.5% 5-yr survival rate)",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "professional services"
+      ],
+      "notes": "Co-operative Bank Business Growth Index 2026",
+      "tab": "UK"
+    },
+    {
+      "name": "Edinburgh",
+      "region": "Scotland",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "#2 UK city for business growth; highest salary growth (9.7%)",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "home services",
+        "trades"
+      ],
+      "notes": "Same index",
+      "tab": "UK"
+    },
+    {
+      "name": "Sheffield",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "#3 UK city for business growth (44.6% 5-yr survival rate)",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "auto repair"
+      ],
+      "notes": "Same index",
+      "tab": "UK"
+    },
+    {
+      "name": "Bristol",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "2.1%/yr economic growth; strong jobs growth",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "trades"
+      ],
+      "notes": "propertyinvestmentsuk.co.uk 2026 report",
+      "tab": "UK"
+    },
+    {
+      "name": "Oxford",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "Strong forecast growth despite high prices; 4%/yr jobs growth",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "tutoring",
+        "home services"
+      ],
+      "notes": "Same source",
+      "tab": "UK"
+    },
+    {
+      "name": "Manchester",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "Fastest-growing city in the North of England, ~2.5%/yr economic growth",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "home services"
+      ],
+      "notes": "Red Flag Alert 2026 — larger metro, but northern-city niche still underserved outside centre",
+      "tab": "UK"
+    },
+    {
+      "name": "Lancaster",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "Over 2% yoy population growth",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "cleaning"
+      ],
+      "notes": "ONS data via Newgrove",
+      "tab": "UK"
+    },
+    {
+      "name": "Bath",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "Over 2% yoy population growth",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "tutoring",
+        "hospitality"
+      ],
+      "notes": "ONS data via Newgrove",
+      "tab": "UK"
+    },
+    {
+      "name": "Coventry",
+      "region": "England",
+      "country": "UK",
+      "population": null,
+      "growth_signal": "1.8% yoy population growth",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "home services"
+      ],
+      "notes": "ONS data via Newgrove",
+      "tab": "UK"
+    },
+    {
+      "name": "Melton",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~180,000 (LGA)",
+      "growth_signal": "Fastest-growing LGA in Australia, 2 years running (+5.8%)",
+      "cluster_group": "Melbourne-Outer-West (Melton/Rockbank-Mt Cottrell)",
+      "suggested_niches": [
+        "Trades",
+        "landscaping",
+        "cleaning",
+        "salons"
+      ],
+      "notes": "ABS Regional Population 2024-25",
+      "tab": "Australia"
+    },
+    {
+      "name": "Rockbank – Mount Cottrell",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~15,000",
+      "growth_signal": "Largest Melbourne suburb growth by number (+4,602)",
+      "cluster_group": "Melbourne-Outer-West (Melton/Rockbank-Mt Cottrell)",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "ABS 2024-25 via Sienna Homes",
+      "tab": "Australia"
+    },
+    {
+      "name": "Fraser Rise – Plumpton",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~20,000",
+      "growth_signal": "Fastest suburb growth rate in Melbourne, ~20%",
+      "cluster_group": "Melbourne-Outer-West (Melton/Rockbank-Mt Cottrell)",
+      "suggested_niches": [
+        "Trades",
+        "daycare",
+        "cleaning"
+      ],
+      "notes": "ABS 2024-25",
+      "tab": "Australia"
+    },
+    {
+      "name": "Clyde North",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~35,000",
+      "growth_signal": "One of Australia's fastest-growing suburbs by population",
+      "cluster_group": "Melbourne-Southeast (Clyde North/Cranbourne East)",
+      "suggested_niches": [
+        "Home services",
+        "landscaping",
+        "daycare"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Cranbourne East",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~30,000",
+      "growth_signal": "Master-planned estate growth corridor",
+      "cluster_group": "Melbourne-Southeast (Clyde North/Cranbourne East)",
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "cleaning"
+      ],
+      "notes": "Same source",
+      "tab": "Australia"
+    },
+    {
+      "name": "Wyndham (Tarneit/Truganina)",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~300,000+ (LGA)",
+      "growth_signal": "Major outer-west Melbourne growth corridor",
+      "cluster_group": "Melbourne-West (Wyndham)",
+      "suggested_niches": [
+        "Home services",
+        "auto repair",
+        "salons"
+      ],
+      "notes": "ABS Regional Population 2024-25",
+      "tab": "Australia"
+    },
+    {
+      "name": "Mickleham",
+      "region": "VIC",
+      "country": "Australia",
+      "population": "~20,000",
+      "growth_signal": "Outer-north Melbourne surge (+4,145 people), steepest growth 2016-2021",
+      "cluster_group": "Melbourne-North (Hume/Mickleham)",
+      "suggested_niches": [
+        "Daycare",
+        "home services",
+        "trades"
+      ],
+      "notes": "ABS via northremovals.com.au",
+      "tab": "Australia"
+    },
+    {
+      "name": "Box Hill – Nelson",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~15,000",
+      "growth_signal": "Fastest population growth in Greater Sydney (+3,911 in 2024-25)",
+      "cluster_group": "Sydney-Northwest (Box Hill/Marsden Park/Riverstone)",
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "home services"
+      ],
+      "notes": "ABS Regional Population 2024-25",
+      "tab": "Australia"
+    },
+    {
+      "name": "Marsden Park",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~20,000",
+      "growth_signal": "Greenfield growth area, outer north-west Sydney",
+      "cluster_group": "Sydney-Northwest (Box Hill/Marsden Park/Riverstone)",
+      "suggested_niches": [
+        "Landscaping",
+        "trades",
+        "salons"
+      ],
+      "notes": "Same source",
+      "tab": "Australia"
+    },
+    {
+      "name": "Riverstone",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~15,000",
+      "growth_signal": "Greenfield growth corridor, outer north-west Sydney",
+      "cluster_group": "Sydney-Northwest (Box Hill/Marsden Park/Riverstone)",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "northremovals.com.au 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Kellyville",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~25,000",
+      "growth_signal": "Large homes + good schools + Metro access",
+      "cluster_group": "Sydney-Northwest (Kellyville)",
+      "suggested_niches": [
+        "Salons",
+        "tutoring",
+        "home services"
+      ],
+      "notes": "northremovals.com.au 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Austral",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~20,000",
+      "growth_signal": "Rapid expansion near Western Sydney Airport corridor",
+      "cluster_group": "Sydney-Southwest (Austral/Leppington/Oran Park)",
+      "suggested_niches": [
+        "Home services",
+        "construction trades"
+      ],
+      "notes": "McDonald Jones Homes 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Leppington",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~15,000",
+      "growth_signal": "South-west greenfield growth corridor",
+      "cluster_group": "Sydney-Southwest (Austral/Leppington/Oran Park)",
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "home services"
+      ],
+      "notes": "northremovals.com.au 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Oran Park",
+      "region": "NSW",
+      "country": "Australia",
+      "population": "~30,000",
+      "growth_signal": "Master-planned town centre, steady growth momentum",
+      "cluster_group": "Sydney-Southwest (Austral/Leppington/Oran Park)",
+      "suggested_niches": [
+        "Salons",
+        "trades",
+        "cleaning"
+      ],
+      "notes": "northremovals.com.au 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Ripley",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~15,000",
+      "growth_signal": "Fast-growing corridor between Brisbane/Ipswich/Toowoomba",
+      "cluster_group": "SEQ-Corridor (Ripley/Plainland/Lowood/Logan Central)",
+      "suggested_niches": [
+        "Home services",
+        "trades",
+        "daycare"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Plainland",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~5,000",
+      "growth_signal": "Same Brisbane-Ipswich-Toowoomba growth corridor",
+      "cluster_group": "SEQ-Corridor (Ripley/Plainland/Lowood/Logan Central)",
+      "suggested_niches": [
+        "Trades",
+        "home services"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Lowood",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~5,000",
+      "growth_signal": "Same corridor, affordable entry point",
+      "cluster_group": "SEQ-Corridor (Ripley/Plainland/Lowood/Logan Central)",
+      "suggested_niches": [
+        "Home services",
+        "trades"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Logan Central",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~10,000",
+      "growth_signal": "Same corridor, closer to Brisbane",
+      "cluster_group": "SEQ-Corridor (Ripley/Plainland/Lowood/Logan Central)",
+      "suggested_niches": [
+        "Home services",
+        "cleaning",
+        "salons"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Baringa",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~10,000",
+      "growth_signal": "Sunshine Coast lifestyle-driven growth suburb",
+      "cluster_group": "Sunshine Coast (Baringa)",
+      "suggested_niches": [
+        "Salons",
+        "hospitality",
+        "home services"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Upper Coomera",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~25,000",
+      "growth_signal": "Gold Coast lifestyle-driven growth suburb",
+      "cluster_group": "Gold Coast (Upper Coomera)",
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "trades"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Bundaberg",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~75,000",
+      "growth_signal": "Regional city, diverse economy, tight rental market",
+      "cluster_group": "Regional QLD (standalone)",
+      "suggested_niches": [
+        "Trades",
+        "hospitality",
+        "auto repair"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Cairns",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~155,000",
+      "growth_signal": "Diversified economy beyond tourism, very tight housing",
+      "cluster_group": "Regional QLD (standalone)",
+      "suggested_niches": [
+        "Hospitality",
+        "home services",
+        "trades"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Mackay",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~80,000",
+      "growth_signal": "Regional growth city, resources-linked economy",
+      "cluster_group": "Regional QLD (standalone)",
+      "suggested_niches": [
+        "Trades",
+        "auto repair",
+        "home services"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Townsville",
+      "region": "QLD",
+      "country": "Australia",
+      "population": "~180,000",
+      "growth_signal": "Regional growth city with major investment",
+      "cluster_group": "Regional QLD (standalone)",
+      "suggested_niches": [
+        "Trades",
+        "auto repair",
+        "home services"
+      ],
+      "notes": "realestate.com.au Hot 100 2026",
+      "tab": "Australia"
+    },
+    {
+      "name": "Gainesville",
+      "region": null,
+      "country": "USA (FL)",
+      "population": null,
+      "growth_signal": "University of Florida",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "tutoring",
+        "auto repair",
+        "cleaning"
+      ],
+      "notes": "Constant small-business turnover around campus",
+      "tab": "College Towns"
+    },
+    {
+      "name": "Athens",
+      "region": null,
+      "country": "USA (GA)",
+      "population": null,
+      "growth_signal": "University of Georgia",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "salons",
+        "hospitality"
+      ],
+      "notes": "Same pattern",
+      "tab": "College Towns"
+    },
+    {
+      "name": "Auburn",
+      "region": null,
+      "country": "USA (AL)",
+      "population": null,
+      "growth_signal": "Auburn University",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "tutoring"
+      ],
+      "notes": "Same",
+      "tab": "College Towns"
+    },
+    {
+      "name": "Statesboro",
+      "region": null,
+      "country": "USA (GA)",
+      "population": null,
+      "growth_signal": "Georgia Southern University",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "salons"
+      ],
+      "notes": "Smaller, less agency-saturated",
+      "tab": "College Towns"
+    },
+    {
+      "name": "College Station",
+      "region": null,
+      "country": "USA (TX)",
+      "population": null,
+      "growth_signal": "Texas A&M University",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "cleaning",
+        "tutoring"
+      ],
+      "notes": "Larger but still under-served outside campus core",
+      "tab": "College Towns"
+    },
+    {
+      "name": "Chapel Hill / Carrboro",
+      "region": null,
+      "country": "USA (NC)",
+      "population": null,
+      "growth_signal": "UNC Chapel Hill",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "home services",
+        "tutoring"
+      ],
+      "notes": "Twin-town market",
+      "tab": "College Towns"
+    },
+    {
+      "name": "Columbia",
+      "region": null,
+      "country": "USA (MO)",
+      "population": null,
+      "growth_signal": "University of Missouri",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "cleaning",
+        "auto repair"
+      ],
+      "notes": null,
+      "tab": "College Towns"
+    },
+    {
+      "name": "Bloomington",
+      "region": null,
+      "country": "USA (IN)",
+      "population": null,
+      "growth_signal": "Indiana University",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Salons",
+        "trades",
+        "tutoring"
+      ],
+      "notes": null,
+      "tab": "College Towns"
+    },
+    {
+      "name": "Tuscaloosa",
+      "region": null,
+      "country": "USA (AL)",
+      "population": null,
+      "growth_signal": "University of Alabama",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Home services",
+        "cleaning",
+        "auto repair"
+      ],
+      "notes": null,
+      "tab": "College Towns"
+    },
+    {
+      "name": "Manhattan",
+      "region": null,
+      "country": "USA (KS)",
+      "population": null,
+      "growth_signal": "Kansas State University",
+      "cluster_group": null,
+      "suggested_niches": [
+        "Trades",
+        "salons",
+        "tutoring"
+      ],
+      "notes": "Small enough that owner-run sites are rarely maintained",
+      "tab": "College Towns"
+    }
+  ],
+  "niche_reference": [
+    {
+      "search_term": "pest control",
+      "why_it_fits": "Owner-operators, rarely marketing-savvy",
+      "hit_rate": "High"
+    },
+    {
+      "search_term": "hvac repair",
+      "why_it_fits": "Trades-heavy, busy doing the work not the website",
+      "hit_rate": "High"
+    },
+    {
+      "search_term": "plumbing services",
+      "why_it_fits": "Same as above",
+      "hit_rate": "High"
+    },
+    {
+      "search_term": "roofing contractor",
+      "why_it_fits": "Often word-of-mouth only",
+      "hit_rate": "High"
+    },
+    {
+      "search_term": "landscaping services",
+      "why_it_fits": "Seasonal, low web investment",
+      "hit_rate": "High"
+    },
+    {
+      "search_term": "auto repair shop",
+      "why_it_fits": "Independent garages, legacy sites common",
+      "hit_rate": "High"
+    },
+    {
+      "search_term": "locksmith",
+      "why_it_fits": "Small operators, minimal marketing",
+      "hit_rate": "Medium-High"
+    },
+    {
+      "search_term": "house cleaning service",
+      "why_it_fits": "Low barrier to entry, high turnover",
+      "hit_rate": "Medium-High"
+    },
+    {
+      "search_term": "handyman services",
+      "why_it_fits": "Solo operators",
+      "hit_rate": "Medium-High"
+    },
+    {
+      "search_term": "hair salon",
+      "why_it_fits": "Independent, often no site or social-only",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "barbershop",
+      "why_it_fits": "Same",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "tattoo studio",
+      "why_it_fits": "Portfolio-only sites or none",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "tailor / alterations",
+      "why_it_fits": "Legacy small business",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "accounting bookkeeping",
+      "why_it_fits": "Small practices, outdated sites common",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "law office solo practitioner",
+      "why_it_fits": "Varies by market; some invest heavily, some none",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "pet grooming",
+      "why_it_fits": "Small operators",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "photography studio",
+      "why_it_fits": "Portfolio sites often stale",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "independent gym fitness studio",
+      "why_it_fits": "Non-chain, non-franchise only",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "daycare childcare center",
+      "why_it_fits": "Compliance-focused, not marketing-focused",
+      "hit_rate": "Medium"
+    },
+    {
+      "search_term": "dry cleaner",
+      "why_it_fits": "Legacy business type",
+      "hit_rate": "Medium-High"
+    }
+  ]
+}

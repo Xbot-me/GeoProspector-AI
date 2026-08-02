@@ -277,7 +277,10 @@ async def export_run_csv(run_id: str):
 
 @app.get("/api/suggest-target")
 async def suggest_target():
-    """Use Gemini or target rotation engine to suggest a fresh target location for finding businesses."""
+    """Suggest a fresh target location + niche using the curated 118-location catalog first, Gemini fallback second."""
+    target = get_next_campaign_target()
+    
+    # Check if target from catalog is un-executed
     try:
         with get_conn() as conn:
             rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
@@ -285,6 +288,11 @@ async def suggest_target():
     except Exception:
         executed = set()
 
+    target_key = (target["query"].lower().strip(), target["location"].lower().strip())
+    if target_key not in executed:
+        return {"query": target["query"], "location": target["location"]}
+
+    # Entire catalog exhausted -> Fallback to Gemini prompt
     if _gemini_client:
         recent_list = list(executed)[-10:] if executed else []
         prompt = (
@@ -301,13 +309,11 @@ async def suggest_target():
             if text.startswith("```"): text = text[3:]
             if text.endswith("```"): text = text[:-3]
             data = json.loads(text.strip())
-            key = (data.get("query", "").lower().strip(), data.get("location", "").lower().strip())
-            if key not in executed and data.get("query") and data.get("location"):
+            if data.get("query") and data.get("location"):
                 return data
         except Exception as e:
             logger.warning(f"Gemini target suggestion fallback: {e}")
 
-    target = get_next_campaign_target()
     return {"query": target["query"], "location": target["location"]}
 
 
