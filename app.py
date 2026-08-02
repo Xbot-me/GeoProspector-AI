@@ -635,10 +635,14 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
         _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
 
     except Exception as e:
-        logger.error(f"Error during pipeline execution for run {run_id}: {e}")
-        run["status"] = "complete"  # Still mark complete if leads were saved
-        update_search_run(run_id, len(businesses), "complete")
-        _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
+        logger.error(f"Error during pipeline execution for run {run_id}: {e}", exc_info=True)
+        run["status"] = "error"
+        update_search_run(run_id, len(businesses), "error")
+        _broadcast(run_id, {
+            "type": "error",
+            "message": f"Pipeline execution failed: {str(e)}",
+            "stats": run["stats"],
+        })
 
 
 def _process_single_business(run_id: str, graph_app, business: dict,
