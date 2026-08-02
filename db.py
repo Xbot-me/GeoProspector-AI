@@ -381,24 +381,20 @@ def retry_failed_emails() -> int:
 
 
 def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
-    """Check if a business has already been processed or contacted (100% solid deduplication)."""
+    """Check if a business has already been contacted or unsubscribed (solid deduplication)."""
     with get_conn() as conn:
         # 1. Check by place_id
         if place_id:
             row = conn.execute(
-                "SELECT send_status, approval_status, lead_score FROM businesses WHERE place_id = %s",
+                "SELECT send_status FROM businesses WHERE place_id = %s",
                 (place_id,),
             ).fetchone()
-            if row and (
-                row["send_status"] in ("sent", "pending_auto_send", "queued")
-                or row["approval_status"] in ("approved", "rejected")
-                or row["lead_score"] is not None
-            ):
+            if row and row["send_status"] in ("sent", "unsubscribed"):
                 return True
-        # 2. Check by exact name if already queued or emailed
+        # 2. Check by exact name if already sent or unsubscribed
         if name and name.strip():
             row = conn.execute(
-                "SELECT send_status FROM businesses WHERE LOWER(name) = LOWER(%s) AND (send_status IN ('sent', 'pending_auto_send', 'queued') OR lead_score IS NOT NULL)",
+                "SELECT send_status FROM businesses WHERE LOWER(name) = LOWER(%s) AND send_status IN ('sent', 'unsubscribed')",
                 (name.strip(),),
             ).fetchone()
             if row:
@@ -406,7 +402,7 @@ def is_business_already_processed(place_id: str, name: str = "", email: str = ""
         # 3. Check by email if present
         if email and "@" in email:
             row = conn.execute(
-                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) AND send_status IN ('sent', 'pending_auto_send', 'queued')",
+                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) AND send_status IN ('sent', 'unsubscribed')",
                 (email.strip(),),
             ).fetchone()
             if row:
