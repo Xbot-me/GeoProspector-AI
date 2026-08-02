@@ -1,6 +1,6 @@
 """
 Worldwide Location & Niche Catalog Rotation Engine.
-Loads curated targets & niche references from data/target_catalog.json.
+Loads curated targets & niche references from catalog/target_catalog.json.
 Provides cluster-aware rotation and niche suggestions.
 """
 import json
@@ -12,8 +12,13 @@ from db import get_conn
 
 logger = logging.getLogger(__name__)
 
-# Load worldwide target catalog from JSON data file
-_CATALOG_PATH = Path(__file__).parent / "data" / "target_catalog.json"
+# Load worldwide target catalog from JSON data file (checking catalog/ then data/ then root)
+_CATALOG_PATH = Path(__file__).parent / "catalog" / "target_catalog.json"
+if not _CATALOG_PATH.exists():
+    _CATALOG_PATH = Path(__file__).parent / "data" / "target_catalog.json"
+if not _CATALOG_PATH.exists():
+    _CATALOG_PATH = Path(__file__).parent / "target_catalog.json"
+
 with open(_CATALOG_PATH, "r", encoding="utf-8") as f:
     _CATALOG = json.load(f)
 
