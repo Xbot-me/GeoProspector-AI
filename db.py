@@ -92,6 +92,8 @@ _MIGRATION_COLUMNS = [
     ("contact_sources", "TEXT"),
     ("lead_score", "INTEGER"),
     ("score_breakdown", "TEXT"),
+    ("analysis", "TEXT"),
+    ("mockup_prompt", "TEXT"),
     ("website", "TEXT"),
     ("email_language", "TEXT"),
     ("email_verified", "BOOLEAN"),
@@ -120,9 +122,12 @@ def _migrate(conn: psycopg.Connection) -> None:
     existing = {row["column_name"].lower() for row in cursor.fetchall()}
     for col_name, col_type in _MIGRATION_COLUMNS:
         if col_name.lower() not in existing:
-            conn.execute(
-                f"ALTER TABLE businesses ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
-            )
+            try:
+                conn.execute(
+                    f"ALTER TABLE businesses ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                )
+            except Exception as e:
+                logger.warning(f"Auto-migration warning adding column {col_name}: {e}")
 
     cursor_runs = conn.execute(
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'search_runs'"
