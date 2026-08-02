@@ -544,20 +544,6 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
         update_search_run(run_id, 0, "error")
         return
 
-    # Filter out 100% solid duplicate businesses before processing
-    new_businesses = []
-    for b in businesses:
-        if is_business_already_processed(b["place_id"], b.get("name", "")):
-            _broadcast(run_id, {
-                "type": "skipped",
-                "name": b.get("name", "Unknown"),
-                "reason": "duplicate",
-                "message": f"Skipping duplicate: {b.get('name')} (already processed in CRM)"
-            })
-        else:
-            new_businesses.append(b)
-    businesses = new_businesses
-
     run["stats"]["found"] = len(businesses)
     update_search_run(run_id, len(businesses), "running")
 
@@ -571,20 +557,22 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
     })
 
     try:
-        # Step 2: Immediately store every found business in CRM + link to run
+        # Step 2: Store every found business in CRM + link to run
         for b in businesses:
-            upsert_business({
-                "place_id": b["place_id"],
-                "name": b["name"],
-                "address": b["address"],
-                "phone": b.get("phone"),
-                "category": b.get("category"),
-                "website": b.get("website"),
-                "rating": b.get("rating"),
-                "review_count": b.get("review_count"),
-                "approval_status": "pending",
-                "send_status": "not_sent",
-            })
+            existing = get_business(b["place_id"])
+            if not existing:
+                upsert_business({
+                    "place_id": b["place_id"],
+                    "name": b["name"],
+                    "address": b["address"],
+                    "phone": b.get("phone"),
+                    "category": b.get("category"),
+                    "website": b.get("website"),
+                    "rating": b.get("rating"),
+                    "review_count": b.get("review_count"),
+                    "approval_status": "pending",
+                    "send_status": "not_sent",
+                })
             link_business_to_run(run_id, b["place_id"])
 
         # Step 3: Process each business through the enrichment pipeline
@@ -592,6 +580,43 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
             graph_app = build_graph(checkpointer)
 
             for i, business in enumerate(businesses):
+                place_id = business["place_id"]
+                name = business["name"]
+
+                # Check if already contacted/sent
+                if is_business_already_processed(place_id, name):
+                    _broadcast(run_id, {
+                        "type": "skipped",
+                        "name": name,
+                        "reason": "duplicate",
+                        "message": f"Already contacted: {name}"
+                    })
+                    continue
+
+                # Check if already enriched in CRM (has lead_score or website_quality)
+                existing = get_business(place_id)
+                if existing and existing.get("lead_score") is not None:
+                    quality = existing.get("website_quality")
+                    score = existing.get("lead_score")
+                    email = existing.get("email")
+
+                    if quality == "good":
+                        run["stats"]["good_website"] += 1
+                    else:
+                        run["stats"]["qualified"] += 1
+                        if email:
+                            run["stats"]["emails_found"] += 1
+
+                    _broadcast(run_id, {
+                        "type": "drafted",
+                        "place_id": place_id,
+                        "name": name,
+                        "lead_score": score,
+                        "has_pitch": bool(existing.get("pitch_body")),
+                    })
+                    continue
+
+                # Not yet enriched -> run through graph
                 _process_single_business(
                     run_id, graph_app, business, i + 1, len(businesses)
                 )
@@ -606,6 +631,7 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
         run["status"] = "complete"
         update_search_run(run_id, len(businesses), "complete")
         _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
+
     except Exception as e:
         logger.error(f"Error during pipeline execution for run {run_id}: {e}")
         run["status"] = "complete"  # Still mark complete if leads were saved
