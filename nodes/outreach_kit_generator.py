@@ -6,23 +6,53 @@ Generates three outreach artifacts for a target business using Gemini:
 2. Lovable mockup prompt — Ready-to-paste prompt for an AI site builder (Lovable.dev / v0) describing a 1-page static demo mockup for this business.
 3. Email draft — Short (~100-130 words), first-person human voice with a literal [MOCKUP_LINK] placeholder. No enforced signature or domain-locked links.
 """
+import logging
+import os
 from google import genai
 
 from config import GEMINI_API_KEY, GEMINI_MODEL
 from state import BusinessState
 
-_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+logger = logging.getLogger(__name__)
+
+
+def _get_client():
+    key = GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
+    if not key:
+        return None
+    try:
+        return genai.Client(api_key=key)
+    except Exception as e:
+        logger.error(f"Failed to initialize Gemini client: {e}")
+        return None
 
 
 def generate_outreach_kit(state: BusinessState) -> dict:
-    if _client is None:
-        raise RuntimeError("GEMINI_API_KEY is not set. Add it to your local .env file.")
-
+    name = state.get("name") or "Local Business"
+    category = state.get("category") or "Local Business"
+    address = state.get("address") or "Location"
     quality = state.get("website_quality", "none")
     notes = state.get("website_notes", "")
     owner = state.get("owner_name")
     rating = state.get("rating")
     review_count = state.get("review_count")
+
+    # Smart fallback kit in case Gemini API is unavailable, unconfigured, or errors out
+    fallback_analysis = f"{name} ({category}) in {address} has website condition '{quality}'. Strongest pitch angle: Offer a modern high-converting 1-page demo site to capture lost local search traffic."
+    fallback_prompt = f"Create a clean, responsive, high-converting 1-page modern landing page demo for '{name}', a {category} in {address}. Include Hero section with call-to-action, Services grid, Customer Reviews, and direct Contact/Booking form."
+    fallback_subject = f"Quick website concept for {name}"
+    fallback_body = f"Hi,\n\nI noticed {name} in {address} and put together a quick, custom 1-page interactive website demo for your business:\n\n[MOCKUP_LINK]\n\nWould you be open to taking a 60-second look?\n\nBest,\nMustafizur Rahman\nhello@mustafizur.info"
+
+    client = _get_client()
+    if client is None:
+        logger.warning(f"GEMINI_API_KEY not configured — returning template fallback kit for {name}")
+        return {
+            "analysis": fallback_analysis,
+            "mockup_prompt": fallback_prompt,
+            "pitch_subject": fallback_subject,
+            "pitch_body": fallback_body,
+            "email_language": "English",
+        }
 
     personalization = []
     if rating and review_count and review_count >= 5:
@@ -38,9 +68,9 @@ def generate_outreach_kit(state: BusinessState) -> dict:
 
     prompt = f"""You are an expert web development consultant and cold outreach specialist. Create a complete 3-part outreach kit for this business.
 
-Business Name: {state.get('name')}
-Category: {state.get('category') or 'Local Business'}
-Location: {state.get('address')}
+Business Name: {name}
+Category: {category}
+Location: {address}
 Website URL: {state.get('website') or 'None'}
 Website Quality: {quality}
 Website Analysis Notes: {notes or 'No website or broken site.'}
@@ -54,7 +84,7 @@ REQUIREMENTS FOR THE 3 ARTIFACTS:
    Write a 2-3 sentence plain-language brief explaining specifically why their current web presence (or lack thereof) is costing them revenue and customer trust, and state the single strongest pitch angle to approach them with.
 
 2. LOVABLE MOCKUP PROMPT:
-   Write a clear, detailed, ready-to-paste prompt for an AI site builder (such as Lovable.dev or v0.dev) to generate a high-converting 1-page modern landing page demo for "{state.get('name')}".
+   Write a clear, detailed, ready-to-paste prompt for an AI site builder (such as Lovable.dev or v0.dev) to generate a high-converting 1-page modern landing page demo for "{name}".
    Include:
    - Target industry and brand tone
    - Key section layout (Hero section, Services, Customer Social Proof/Reviews, Direct Call to Action / Booking Form)
@@ -71,11 +101,11 @@ REQUIREMENTS FOR THE 3 ARTIFACTS:
    - No forced company signature, no letterhead HTML, no domain-locked URLs.
 
 LANGUAGE RULE:
-Detect the local language from Location ({state.get('address')}) and write the Subject Line and Email Draft in that local language (e.g. English, Spanish, German, French). The Analysis and Mockup Prompt should remain in English.
+Detect the local language from Location ({address}) and write the Subject Line and Email Draft in that local language (e.g. English, Spanish, German, French). The Analysis and Mockup Prompt should remain in English.
 
 Output in EXACTLY this format:
 
-LANGUAGE: <Language name, e.g. English, Spanish, German>
+LANGUAGE: English
 
 ANALYSIS:
 <Analysis summary>
@@ -89,34 +119,50 @@ SUBJECT:
 BODY:
 <Email draft body with [MOCKUP_LINK]>"""
 
-    resp = _client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-    text = (resp.text or "").strip()
+    try:
+        resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        text = (resp.text or "").strip()
+    except Exception as e:
+        logger.error(f"Gemini API call failed for {name}: {e}")
+        return {
+            "analysis": fallback_analysis,
+            "mockup_prompt": fallback_prompt,
+            "pitch_subject": fallback_subject,
+            "pitch_body": fallback_body,
+            "email_language": "English",
+        }
 
     language = "English"
-    analysis = f"Business website state is '{quality}'. Potential opportunity for modern site build."
-    mockup_prompt = f"Build a modern, clean 1-page website demo for {state.get('name')}, a {state.get('category') or 'local business'} located in {state.get('address')}."
-    subject = f"Quick concept for {state.get('name')}"
-    body = f"Hi,\n\nI noticed {state.get('name')} and built a quick mockup of a modern site layout for you: [MOCKUP_LINK]\n\nWould you be open to taking a 60-second look?\n\nBest,"
+    analysis = fallback_analysis
+    mockup_prompt = fallback_prompt
+    subject = fallback_subject
+    body = fallback_body
 
-    if "LANGUAGE:" in text:
-        try:
-            parts = text.split("ANALYSIS:", 1)
-            lang_line = parts[0].replace("LANGUAGE:", "").strip()
-            if lang_line:
-                language = lang_line
+    try:
+        # Flexible section extraction
+        clean_text = text.replace("**", "").replace("### ", "")
+        
+        if "ANALYSIS:" in clean_text and "MOCKUP_PROMPT:" in clean_text:
+            analysis_part = clean_text.split("ANALYSIS:", 1)[1].split("MOCKUP_PROMPT:", 1)[0].strip()
+            if analysis_part: analysis = analysis_part
 
-            rest = parts[1]
-            mockup_split = rest.split("MOCKUP_PROMPT:", 1)
-            analysis = mockup_split[0].strip()
+        if "MOCKUP_PROMPT:" in clean_text and "SUBJECT:" in clean_text:
+            mockup_part = clean_text.split("MOCKUP_PROMPT:", 1)[1].split("SUBJECT:", 1)[0].strip()
+            if mockup_part: mockup_prompt = mockup_part
 
-            subj_split = mockup_split[1].split("SUBJECT:", 1)
-            mockup_prompt = subj_split[0].strip()
+        if "SUBJECT:" in clean_text and "BODY:" in clean_text:
+            subject_part = clean_text.split("SUBJECT:", 1)[1].split("BODY:", 1)[0].strip()
+            if subject_part: subject = subject_part
 
-            body_split = subj_split[1].split("BODY:", 1)
-            subject = body_split[0].strip()
-            body = body_split[1].strip()
-        except (IndexError, ValueError):
-            pass
+        if "BODY:" in clean_text:
+            body_part = clean_text.split("BODY:", 1)[1].strip()
+            if body_part: body = body_part
+
+        if "LANGUAGE:" in clean_text:
+            lang_line = clean_text.split("LANGUAGE:", 1)[1].split("\n", 1)[0].strip()
+            if lang_line: language = lang_line
+    except Exception as parse_err:
+        logger.warning(f"Error parsing Gemini response for {name}: {parse_err}")
 
     return {
         "analysis": analysis,
