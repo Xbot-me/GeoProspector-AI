@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-02T09:47:56Z",
+  "git_head": "6c8feef2011f539b085a51dad30002930ab5bd54",
+  "token_estimate_method": "tiktoken_cl100k_base",
+  "token_estimate_params": {
+    "python": 3.95,
+    "js": 3.7,
+    "ts": 3.75,
+    "php": 3.9,
+    "go": 3.85,
+    "bash": 4.1,
+    "sql": 4.0,
+    "default": 3.9,
+    "max_file_bytes": 300000,
+    "max_file_loc": 8000
+  },
+  "repo_snapshot": {
+    "file_count": 21,
+    "total_bytes": 152095,
+    "total_tokens": 35670
+  },
+  "scan_fingerprint": "8c86f2ffb4b0aa0ea26b3269e0e8247ad11961268758db895d634d48d717ad98",
+  "stack": [
+    "Docker",
+    "Docker Compose",
+    "Python (pip)"
+  ],
+  "file_count": 21,
+  "total_tokens": 35670,
+  "top_50_tokens": 35670,
+  "top_files": [
+    {
+      "path": "config.py",
+      "score": 0.05968,
+      "fan_in": 11,
+      "lang": "python",
+      "loc": 103,
+      "tokens": 997
+    },
+    {
+      "path": "state.py",
+      "score": 0.03869,
+      "fan_in": 8,
+      "lang": "python",
+      "loc": 55,
+      "tokens": 423
+    },
+    {
+      "path": "db.py",
+      "score": 0.02259,
+      "fan_in": 5,
+      "lang": "python",
+      "loc": 482,
+      "tokens": 3919
+    },
+    {
+      "path": "quota.py",
+      "score": 0.01299,
+      "fan_in": 3,
+      "lang": "python",
+      "loc": 64,
+      "tokens": 465
+    },
+    {
+      "path": "nodes/website_check.py",
+      "score": 0.0097,
+      "fan_in": 2,
+      "lang": "python",
+      "loc": 194,
+      "tokens": 1682
+    },
+    {
+      "path": "graph.py",
+      "score": 0.00912,
+      "fan_in": 2,
+      "lang": "python",
+      "loc": 90,
+      "tokens": 673
+    },
+    {
+      "path": "nodes/places_search.py",
+      "score": 0.00912,
+      "fan_in": 2,
+      "lang": "python",
+      "loc": 66,
+      "tokens": 540
+    },
+    {
+      "path": "email_verifier.py",
+      "score": 0.00884,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 133,
+      "tokens": 1098
+    },
+    {
+      "path": "nodes/outreach_kit_generator.py",
+      "score": 0.00876,
+      "fan_in": 2,
+      "lang": "python",
+      "loc": 174,
+      "tokens": 1749
+    },
+    {
+      "path": "nodes/email_finder.py",
+      "score": 0.008,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 186,
+      "tokens": 1358
+    },
+    {
+      "path": "nodes/lead_scorer.py",
+      "score": 0.008,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 115,
+      "tokens": 865
+    },
+    {
+      "path": "nodes/social_finder.py",
+      "score": 0.008,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 97,
+      "tokens": 774
+    },
+    {
+      "path": "nodes/business_analyzer.py",
+      "score": 0.008,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 80,
+      "tokens": 696
+    },
+    {
+      "path": "nodes/crm_writer.py",
+      "score": 0.008,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 43,
+      "tokens": 370
+    },
+    {
+      "path": "auto_campaign.py",
+      "score": 0.0079,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 183,
+      "tokens": 1592
+    },
+    {
+      "path": "email_sender.py",
+      "score": 0.0079,
+      "fan_in": 1,
+      "lang": "python",
+      "loc": 171,
+      "tokens": 1549
+    },
+    {
+      "path": "app.py",
+      "score": 0.00714,
+      "fan_in": 0,
+      "lang": "python",
+      "loc": 814,
+      "tokens": 6692
+    },
+    {
+      "path": "static/app.js",
+      "score": 0.00714,
+      "fan_in": 0,
+      "lang": "js",
+      "loc": 732,
+      "tokens": 6389
+    },
+    {
+      "path": "static/history.js",
+      "score": 0.00714,
+      "fan_in": 0,
+      "lang": "js",
+      "loc": 253,
+      "tokens": 2420
+    },
+    {
+      "path": "main.py",
+      "score": 0.00714,
+      "fan_in": 0,
+      "lang": "python",
+      "loc": 169,
+      "tokens": 1419
+    },
+    {
+      "path": "nodes/__init__.py",
+      "score": 0.00714,
+      "fan_in": 0,
+      "lang": "python",
+      "loc": 1,
+      "tokens": 0
+    }
+  ]
+}
