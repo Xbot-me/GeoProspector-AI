@@ -38,6 +38,7 @@ class BusinessState(TypedDict, total=False):
 
     # LLM outputs
     analysis: Optional[str]
+    mockup_prompt: Optional[str]
     pitch_subject: Optional[str]
     pitch_body: Optional[str]
     email_language: Optional[str]
