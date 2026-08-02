@@ -564,41 +564,47 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
         ],
     })
 
-    # Step 2: Immediately store every found business in CRM + link to run
-    for b in businesses:
-        upsert_business({
-            "place_id": b["place_id"],
-            "name": b["name"],
-            "address": b["address"],
-            "phone": b.get("phone"),
-            "category": b.get("category"),
-            "website": b.get("website"),
-            "rating": b.get("rating"),
-            "review_count": b.get("review_count"),
-            "approval_status": "pending",
-            "send_status": "not_sent",
-        })
-        link_business_to_run(run_id, b["place_id"])
-
-    # Step 3: Process each business through the enrichment pipeline
-    with get_checkpointer_cm() as checkpointer:
-        graph_app = build_graph(checkpointer)
-
-        for i, business in enumerate(businesses):
-            _process_single_business(
-                run_id, graph_app, business, i + 1, len(businesses)
-            )
-
-    # Auto-save CSV to disk
     try:
-        _write_run_csv_to_disk(run_id)
-    except Exception as e:
-        logger.error(f"Failed to auto-save CSV: {e}")
+        # Step 2: Immediately store every found business in CRM + link to run
+        for b in businesses:
+            upsert_business({
+                "place_id": b["place_id"],
+                "name": b["name"],
+                "address": b["address"],
+                "phone": b.get("phone"),
+                "category": b.get("category"),
+                "website": b.get("website"),
+                "rating": b.get("rating"),
+                "review_count": b.get("review_count"),
+                "approval_status": "pending",
+                "send_status": "not_sent",
+            })
+            link_business_to_run(run_id, b["place_id"])
 
-    # Done
-    run["status"] = "complete"
-    update_search_run(run_id, len(businesses), "complete")
-    _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
+        # Step 3: Process each business through the enrichment pipeline
+        with get_checkpointer_cm() as checkpointer:
+            graph_app = build_graph(checkpointer)
+
+            for i, business in enumerate(businesses):
+                _process_single_business(
+                    run_id, graph_app, business, i + 1, len(businesses)
+                )
+
+        # Auto-save CSV to disk
+        try:
+            _write_run_csv_to_disk(run_id)
+        except Exception as e:
+            logger.error(f"Failed to auto-save CSV: {e}")
+
+        # Done
+        run["status"] = "complete"
+        update_search_run(run_id, len(businesses), "complete")
+        _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
+    except Exception as e:
+        logger.error(f"Error during pipeline execution for run {run_id}: {e}")
+        run["status"] = "complete"  # Still mark complete if leads were saved
+        update_search_run(run_id, len(businesses), "complete")
+        _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
 
 
 def _process_single_business(run_id: str, graph_app, business: dict,
