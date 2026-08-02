@@ -32,6 +32,7 @@ const queueList = document.getElementById('queueList');
 
 const progressSection = document.getElementById('progressSection');
 const progressStatus = document.getElementById('progressStatus');
+const progressBar = document.getElementById('progressBar');
 const eventFeed = document.getElementById('eventFeed');
 const toastContainer = document.getElementById('toastContainer');
 
@@ -82,7 +83,8 @@ async function fetchLeads() {
       return;
     }
     const data = await res.json();
-    state.leads = data.leads || [];
+    // Handle both raw Array response and { leads: [...] } object wrapper
+    state.leads = Array.isArray(data) ? data : (data.leads || []);
     renderLeads();
   } catch (err) {
     showToast('Error loading leads: ' + err.message, 'error');
@@ -222,7 +224,7 @@ function renderQueueCards(leads) {
 }
 
 
-// ── Actions ─────────────────────────────────────────────────────────────
+// ── Lead Actions ────────────────────────────────────────────────────────
 async function buildOutreachKit(placeId) {
   showToast('Building outreach kit with Gemini...', 'info');
   try {
@@ -334,7 +336,7 @@ async function sendSingleEmailAPI(placeId) {
 }
 
 
-// ── Search & Telemetry ──────────────────────────────────────────────────
+// ── Search & Telemetry Live Progress ────────────────────────────────────
 async function handleSearchSubmit(e) {
   e.preventDefault();
   const query = queryInput.value.trim();
@@ -351,6 +353,7 @@ async function handleSearchSubmit(e) {
   searchBtn.textContent = 'Searching...';
   progressSection.classList.remove('hidden');
   eventFeed.innerHTML = '';
+  if (progressBar) progressBar.style.width = '5%';
   progressStatus.textContent = 'Starting discovery pipeline...';
 
   try {
@@ -379,14 +382,7 @@ function connectWebSocket(runId) {
 
   state.ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    appendEventLog(data);
-
-    if (data.type === 'run_complete' || data.type === 'error') {
-      searchBtn.disabled = false;
-      searchBtn.textContent = 'Discover Leads';
-      progressStatus.textContent = data.type === 'run_complete' ? 'Run Complete!' : 'Run Error';
-      fetchLeads(); // Refresh leads
-    }
+    handleWebSocketEvent(data);
   };
 
   state.ws.onerror = () => {
@@ -396,16 +392,68 @@ function connectWebSocket(runId) {
 }
 
 
-function appendEventLog(data) {
-  const timeStr = new Date().toLocaleTimeString();
-  let msg = `[${timeStr}] ${data.message || data.type}`;
-  if (data.type === 'places_found') msg = `[${timeStr}] Found ${data.count} businesses in Google Places`;
-  if (data.type === 'drafted') msg = `[${timeStr}] Enriched ${data.name} — Score: ${data.lead_score}`;
+function handleWebSocketEvent(data) {
+  const now = new Date();
+  const timeStr = now.toTimeString().split(' ')[0]; // HH:MM:SS
+  const eventType = data.type;
 
-  const div = document.createElement('div');
-  div.textContent = msg;
-  eventFeed.appendChild(div);
-  eventFeed.scrollTop = eventFeed.scrollHeight;
+  let lineText = '';
+  let colorStyle = 'color: var(--text-ink);';
+
+  if (eventType === 'search_start') {
+    lineText = `${timeStr} — searching "${data.query || 'businesses'}" in ${data.location || 'target area'}...`;
+    progressStatus.textContent = lineText;
+    if (progressBar) progressBar.style.width = '10%';
+  } else if (eventType === 'status') {
+    lineText = `${timeStr} — ${data.message}`;
+    progressStatus.textContent = lineText;
+  } else if (eventType === 'search_complete') {
+    lineText = `${timeStr} — found ${data.count} businesses`;
+    progressStatus.textContent = lineText;
+    if (progressBar) progressBar.style.width = '25%';
+  } else if (eventType === 'skipped') {
+    lineText = `${timeStr} — skipped ${data.name || 'business'}: ${data.reason || 'duplicate'}`;
+    colorStyle = 'color: var(--stamp-amber);';
+  } else if (eventType === 'processing') {
+    const pct = data.total ? Math.round((data.index / data.total) * 75) + 20 : 50;
+    if (progressBar) progressBar.style.width = `${pct}%`;
+    lineText = `${timeStr} — processing ${data.index}/${data.total}: ${data.name}`;
+    progressStatus.textContent = lineText;
+  } else if (eventType === 'drafted') {
+    lineText = `${timeStr} — enriched ${data.name} (score: ${data.lead_score || 0})`;
+    colorStyle = 'color: var(--accent-teal);';
+  } else if (eventType === 'business_error') {
+    lineText = `${timeStr} — error processing ${data.name}: ${data.error}`;
+    colorStyle = 'color: var(--stamp-rust);';
+  } else if (eventType === 'complete') {
+    const stats = data.stats || {};
+    lineText = `${timeStr} — run complete (${stats.qualified || 0} qualified, ${stats.emails_found || 0} emails found)`;
+    colorStyle = 'color: var(--stamp-green); font-weight: 600;';
+    progressStatus.textContent = lineText;
+    if (progressBar) progressBar.style.width = '100%';
+
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Discover Leads';
+    
+    // Immediately fetch updated leads backlog into tabs
+    fetchLeads();
+  } else if (eventType === 'error') {
+    lineText = `${timeStr} — error: ${data.message}`;
+    colorStyle = 'color: var(--stamp-rust); font-weight: 600;';
+    progressStatus.textContent = lineText;
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Discover Leads';
+  } else {
+    lineText = `${timeStr} — ${data.message || eventType}`;
+  }
+
+  if (lineText) {
+    const div = document.createElement('div');
+    div.style.cssText = `padding: 4px 0; border-bottom: 1px solid var(--border-hairline); ${colorStyle}`;
+    div.textContent = lineText;
+    eventFeed.appendChild(div);
+    eventFeed.scrollTop = eventFeed.scrollHeight;
+  }
 }
 
 
