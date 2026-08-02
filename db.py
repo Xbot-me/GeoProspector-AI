@@ -140,6 +140,7 @@ def init_db() -> None:
         conn.execute(SCHEMA_SUPPRESSION)
         _migrate(conn)
         conn.execute("DELETE FROM search_runs WHERE ip_address = 'auto_pilot_daemon'")
+        conn.execute("UPDATE search_runs SET status = 'complete' WHERE status = 'running'")
 
 
 # ── Search runs ──────────────────────────────────────────────────────────
