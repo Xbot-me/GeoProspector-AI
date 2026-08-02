@@ -5,3 +5,4 @@ __pycache__/
 crm.sqlite3
 quota_state.json
 checkpoints.sqlite3
+data/*.csv

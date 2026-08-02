@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "repo-brain context index",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "git_head": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "token_estimate_method": {
+      "type": "string"
+    },
+    "token_estimate_params": {
+      "type": "object"
+    },
+    "repo_snapshot": {
+      "type": "object",
+      "properties": {
+        "file_count": {
+          "type": "integer"
+        },
+        "total_bytes": {
+          "type": "integer"
+        },
+        "total_tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file_count",
+        "total_bytes",
+        "total_tokens"
+      ]
+    },
+    "scan_fingerprint": {
+      "type": "string"
+    },
+    "stack": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "file_count": {
+      "type": "integer"
+    },
+    "total_tokens": {
+      "type": "integer"
+    },
+    "top_50_tokens": {
+      "type": "integer"
+    },
+    "top_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "fan_in": {
+            "type": "integer"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "loc": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "score",
+          "fan_in",
+          "lang",
+          "loc",
+          "tokens"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "token_estimate_method",
+    "repo_snapshot",
+    "scan_fingerprint",
+    "stack",
+    "file_count",
+    "total_tokens",
+    "top_50_tokens",
+    "top_files"
+  ]
+}
