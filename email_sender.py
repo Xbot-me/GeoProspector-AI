@@ -18,41 +18,66 @@ from config import (
     SMTP_PORT,
     SMTP_USER,
     SMTP_PASS,
-    SENDER_SIGNATURE,
+    SENDER_EMAIL,
+    SENDER_NAME,
+    SENDER_PHONE,
     SENDER_PHYSICAL_ADDRESS,
+    SENDER_SIGNATURE,
+    SENDER_TITLE,
+    SENDER_WEBSITE,
+    TRACKING_BASE_URL,
     UNSUBSCRIBE_BASE_URL,
 )
-from db import record_email_sent, is_suppressed
+from db import is_suppressed, record_email_sent, record_followup_sent
 
-TRACKING_BASE_URL = "https://b2b.mustafizur.info"
-WEBSITE_URL = "https://www.mustafizur.info"
+WEBSITE_URL = SENDER_WEBSITE
+
+
+def _unsubscribe_target(place_id: str) -> str:
+    """URL recipients can hit to opt out, or a mailto: when this app has no
+    public URL (e.g. running on a PC)."""
+    if UNSUBSCRIBE_BASE_URL:
+        return f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
+    return f"mailto:{SENDER_EMAIL}?subject=Unsubscribe"
+
+
+def _strip_signature(body_text: str) -> str:
+    """Drop the plain-text signature block (the HTML layout adds its own)."""
+    if SENDER_NAME and SENDER_NAME in body_text:
+        return body_text.split(SENDER_NAME)[0].strip()
+    return body_text.strip()
 
 
 def _clean_body_text(body_text: str) -> str:
     """Safety guarantee: ensure existing db leads or manual sends have the full signature."""
-    if "mustafizur.info" in body_text:
+    if SENDER_WEBSITE in body_text:
         return body_text
     for placeholder in ("[Your Name]", "[Your name]", "[your name]", "[YOUR NAME]"):
         if placeholder in body_text:
             return body_text.replace(placeholder, SENDER_SIGNATURE).strip()
-    if "Mustafizur Rahman" in body_text:
-        return body_text.replace("Mustafizur Rahman", SENDER_SIGNATURE).strip()
+    if SENDER_NAME and SENDER_NAME in body_text:
+        return body_text.replace(SENDER_NAME, SENDER_SIGNATURE).strip()
     return f"{body_text.strip()}\n\n{SENDER_SIGNATURE}"
+
+
+def _initials() -> str:
+    parts = [p for p in SENDER_NAME.split() if p]
+    return "".join(p[0].upper() for p in parts[:2]) or "?"
 
 
 def _build_header_html() -> str:
     """Dark letterhead bar with monogram badge — establishes who's emailing up front."""
-    return """<tr>
+    return f"""<tr>
     <td style="background-color:#0f172a; padding:22px 32px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         <tr>
           <td style="vertical-align:middle;">
             <table role="presentation" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="width:36px; height:36px; background:linear-gradient(135deg,#2563eb,#06b6d4); border-radius:9px; text-align:center; vertical-align:middle; font-weight:700; font-size:14px; color:#ffffff; font-family:Arial, sans-serif;">MR</td>
+                <td style="width:36px; height:36px; background:linear-gradient(135deg,#2563eb,#06b6d4); border-radius:9px; text-align:center; vertical-align:middle; font-weight:700; font-size:14px; color:#ffffff; font-family:Arial, sans-serif;">{_initials()}</td>
                 <td style="padding-left:12px;">
-                  <div style="color:#ffffff; font-weight:700; font-size:14px; letter-spacing:-0.01em;">Mustafizur Rahman</div>
-                  <div style="color:#94a3b8; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.06em;">Web Developer &nbsp;&middot;&nbsp; Local Business Sites</div>
+                  <div style="color:#ffffff; font-weight:700; font-size:14px; letter-spacing:-0.01em;">{SENDER_NAME}</div>
+                  <div style="color:#94a3b8; font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.06em;">{SENDER_TITLE}</div>
                 </td>
               </tr>
             </table>
@@ -100,7 +125,7 @@ def _build_cta_html() -> str:
       <table role="presentation" cellpadding="0" cellspacing="0">
         <tr>
           <td style="background:linear-gradient(90deg,#2563eb,#0ea5e9); border-radius:10px;">
-            <a href="{WEBSITE_URL}" style="display:inline-block; padding:13px 30px; font-size:14px; font-weight:600; color:#ffffff; text-decoration:none; letter-spacing:0.01em;">Visit mustafizur.info &nbsp;&rarr;</a>
+            <a href="{WEBSITE_URL}" style="display:inline-block; padding:13px 30px; font-size:14px; font-weight:600; color:#ffffff; text-decoration:none; letter-spacing:0.01em;">Visit {WEBSITE_URL.replace("https://", "").replace("http://", "").rstrip("/")} &nbsp;&rarr;</a>
           </td>
         </tr>
       </table>
@@ -109,15 +134,18 @@ def _build_cta_html() -> str:
 
 
 def _build_signature_html() -> str:
-    """Slim signature — 100% domain-aligned links only (mustafizur.info)."""
-    return """<tr>
+    """Slim signature: contact email and optional phone."""
+    phone_html = (
+        f'&nbsp;&middot;&nbsp;\n            <span style="color:#475569;">{SENDER_PHONE}</span>'
+        if SENDER_PHONE else ""
+    )
+    return f"""<tr>
     <td style="padding:0 32px 30px 32px; border-top:1px solid #f1f5f9;">
       <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
         <tr>
           <td style="font-size:13px; color:#334155; line-height:1.9;">
-            <a href="mailto:hello@mustafizur.info" style="color:#2563eb; text-decoration:none; font-weight:500;">hello@mustafizur.info</a>
-            &nbsp;&middot;&nbsp;
-            <span style="color:#475569;">+880 1886-769509</span>
+            <a href="mailto:{SENDER_EMAIL}" style="color:#2563eb; text-decoration:none; font-weight:500;">{SENDER_EMAIL}</a>
+            {phone_html}
           </td>
         </tr>
       </table>
@@ -127,7 +155,7 @@ def _build_signature_html() -> str:
 
 def _build_canspam_footer_html(place_id: str) -> str:
     """CAN-SPAM compliant footer block."""
-    unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
+    unsub_url = _unsubscribe_target(place_id)
     address = SENDER_PHYSICAL_ADDRESS or "Dhaka, Bangladesh"
     return f"""<tr>
     <td style="background-color:#f8fafc; padding:18px 32px; font-size:11px; color:#94a3b8; line-height:1.6;">
@@ -148,10 +176,7 @@ def format_html_email(
     slim signature, CAN-SPAM footer, tracking pixel."""
     # Strip the plain-text signature block from the copy — the header/signature
     # blocks already cover that, so we don't want it duplicated in the body.
-    if "Mustafizur Rahman" in body_text:
-        main_copy = body_text.split("Mustafizur Rahman")[0].strip()
-    else:
-        main_copy = body_text.strip()
+    main_copy = _strip_signature(body_text)
 
     paragraphs = main_copy.split("\n\n")
     formatted_p = []
@@ -173,9 +198,12 @@ def format_html_email(
     signature_html = _build_signature_html()
     footer_html = _build_canspam_footer_html(place_id)
 
+    # Only embed the pixel when this app has a public URL; otherwise it would
+    # point at nothing and just hurt deliverability.
     tracking_pixel = (
         f"<img src='{TRACKING_BASE_URL}/api/track/open/{place_id}.png' "
         "width='1' height='1' alt='' style='display:none; border:0;' />"
+        if TRACKING_BASE_URL else ""
     )
 
     return f"""<!DOCTYPE html>
@@ -202,6 +230,13 @@ def format_html_email(
 </html>"""
 
 
+def _unsubscribe_headers(unsub_url: str, one_click: bool) -> dict:
+    headers = {"List-Unsubscribe": f"<{unsub_url}>"}
+    if one_click:
+        headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+    return headers
+
+
 def send_email(
     place_id: str,
     to_email: str,
@@ -209,6 +244,7 @@ def send_email(
     body_text: str,
     rating: float | None = None,
     review_count: int | None = None,
+    is_followup: bool = False,
 ) -> tuple[bool, str | None]:
     """
     Dispatch email using configured provider (resend or smtp).
@@ -217,22 +253,25 @@ def send_email(
     rating/review_count are optional — when both are provided, the email
     includes a stat-highlight card; otherwise that section is omitted.
     """
+    _record = record_followup_sent if is_followup else record_email_sent
+
     if not to_email or "@" not in to_email:
         err = f"Invalid recipient email: '{to_email}'"
-        record_email_sent(place_id, status="failed", error=err)
+        _record(place_id, status="failed", error=err)
         return False, err
 
     # Check suppression list (bounced, complained, unsubscribed)
     if is_suppressed(to_email):
         err = f"Suppressed: '{to_email}' is on the suppression list (bounce/complaint/unsubscribe)"
-        record_email_sent(place_id, status="failed", error=err)
+        _record(place_id, status="failed", error=err)
         return False, err
 
     body_text = _clean_body_text(body_text)
     html_body = format_html_email(body_text, place_id, rating=rating, review_count=review_count)
 
     # Build plain-text footer for the text/plain MIME part
-    unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
+    unsub_url = _unsubscribe_target(place_id)
+    one_click = bool(UNSUBSCRIBE_BASE_URL)  # RFC 8058 needs a real HTTPS endpoint
     address = SENDER_PHYSICAL_ADDRESS or "Dhaka, Bangladesh"
     plain_footer = f"\n\n---\n{address}\nUnsubscribe: {unsub_url}"
     body_text_with_footer = body_text + plain_footer
@@ -242,8 +281,8 @@ def send_email(
         if not RESEND_API_KEY or RESEND_API_KEY.startswith("re_xxxx"):
             err = "Resend API key not configured in .env (or is placeholder)."
             print(f"[SIMULATED SEND] To: {to_email} | Subject: {subject} | Provider: Resend")
-            record_email_sent(place_id, status="sent", error="Simulated send (no live API key)")
-            return True, None
+            _record(place_id, status="simulated", error=err)
+            return False, err
 
         try:
             resp = requests.post(
@@ -258,23 +297,20 @@ def send_email(
                     "subject": subject,
                     "html": html_body,
                     "text": body_text_with_footer,
-                    "headers": {
-                        "List-Unsubscribe": f"<{unsub_url}>",
-                        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-                    },
+                    "headers": _unsubscribe_headers(unsub_url, one_click),
                 },
                 timeout=15,
             )
             if resp.status_code in (200, 201, 202):
-                record_email_sent(place_id, status="sent")
+                _record(place_id, status="sent")
                 return True, None
             else:
                 err = f"Resend API error ({resp.status_code}): {resp.text}"
-                record_email_sent(place_id, status="failed", error=err)
+                _record(place_id, status="failed", error=err)
                 return False, err
         except Exception as e:
             err = f"Resend network exception: {str(e)}"
-            record_email_sent(place_id, status="failed", error=err)
+            _record(place_id, status="failed", error=err)
             return False, err
 
     # 2. Direct SMTP (Gmail / Workspace / Outlook)
@@ -282,15 +318,15 @@ def send_email(
         if not SMTP_USER or not SMTP_PASS:
             err = "SMTP credentials not configured in .env."
             print(f"[SIMULATED SEND] To: {to_email} | Subject: {subject} | Provider: SMTP")
-            record_email_sent(place_id, status="sent", error="Simulated send (no SMTP creds)")
-            return True, None
+            _record(place_id, status="simulated", error=err)
+            return False, err
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
         msg["To"] = to_email
-        msg["List-Unsubscribe"] = f"<{unsub_url}>"
-        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        for header, value in _unsubscribe_headers(unsub_url, one_click).items():
+            msg[header] = value
 
         msg.attach(MIMEText(body_text_with_footer, "plain", "utf-8"))
         msg.attach(MIMEText(html_body, "html", "utf-8"))
@@ -301,9 +337,9 @@ def send_email(
                     server.starttls()
                 server.login(SMTP_USER, SMTP_PASS)
                 server.sendmail(SMTP_USER, [to_email], msg.as_string())
-            record_email_sent(place_id, status="sent")
+            _record(place_id, status="sent")
             return True, None
         except Exception as e:
             err = f"SMTP error: {str(e)}"
-            record_email_sent(place_id, status="failed", error=err)
+            _record(place_id, status="failed", error=err)
             return False, err

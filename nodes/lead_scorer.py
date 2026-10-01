@@ -22,6 +22,14 @@ Scoring rubric:
   Google rating:
     >= 4.0       +10   (quality business)
 
+  Performance audit (live sites only):
+    PageSpeed < 30  +10   (painfully slow on a phone)
+    PageSpeed < 50   +5
+
+  Winnable:
+    rating >= 4.2, 30+ reviews and a weak web presence  +10
+    (they already have happy customers and a visible gap)
+
   Contact-ability:
     Email found  +15   (we can actually reach them)
     Phone listed  +5
@@ -62,7 +70,24 @@ def score_lead(state: BusinessState) -> dict:
     elif quality == "outdated":
         score += 20
         breakdown.append("Outdated website: +20")
-    # "good" adds 0
+    # "good" and "unknown" add 0 (unknown = we could not check, not a gap)
+
+    # --- Performance audit ---
+    pagespeed = state.get("pagespeed_score")
+    if pagespeed is not None and quality in ("outdated",):
+        if pagespeed < 30:
+            score += 10
+            breakdown.append(f"Mobile PageSpeed {pagespeed}/100: +10")
+        elif pagespeed < 50:
+            score += 5
+            breakdown.append(f"Mobile PageSpeed {pagespeed}/100: +5")
+
+    # --- Winnable: good reputation, weak web presence ---
+    _rating = state.get("rating") or 0
+    _reviews = state.get("review_count") or 0
+    if quality in ("none", "social_only", "dead", "outdated") and _rating >= 4.2 and _reviews >= 30:
+        score += 10
+        breakdown.append("Strong reputation with a weak web presence: +10")
 
     # --- Google reviews ---
     review_count = state.get("review_count") or 0

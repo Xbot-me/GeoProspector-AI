@@ -34,13 +34,21 @@ from db import (
     upsert_business, record_email_open, get_pending_auto_send_leads,
     get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
     unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
+    get_followup_candidates, get_call_list,
 )
+from callscript import CSV_FIELDS as CALL_CSV_FIELDS, build_call_sheet
+from followup import build_followup
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
 from graph import build_graph, get_checkpointer_cm
 from nodes.places_search import search_businesses
 from quota import QuotaExceededError
-from config import MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL, ADMIN_USERNAME, ADMIN_PASSWORD
+from config import (
+    MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL, ADMIN_USERNAME, ADMIN_PASSWORD,
+    AUTO_SEND_EMAILS, MAX_DAILY_EMAILS, FOLLOWUP_ENABLED, FOLLOWUP_AFTER_DAYS,
+    OUTREACH_COUNTRIES,
+)
+OUTREACH_COUNTRIES_DISPLAY = [c.upper() if len(c) <= 3 else c.title() for c in OUTREACH_COUNTRIES]
 
 from google import genai
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -73,21 +81,25 @@ def _interval_worker_loop():
     while True:
         try:
             sent_today = get_daily_sent_count()
-            if sent_today >= 20:
-                _scheduler_state["next_send_time"] = "Daily quota reached (20/20)"
+            if sent_today >= MAX_DAILY_EMAILS:
+                _scheduler_state["next_send_time"] = f"Daily quota reached ({sent_today}/{MAX_DAILY_EMAILS})"
                 time.sleep(300)
                 continue
 
             pending = get_pending_auto_send_leads(limit=100)
             _scheduler_state["scheduled_count"] = len(pending)
 
-            if not pending:
-                _scheduler_state["next_send_time"] = "Queue empty (waiting for leads...)"
+            # A due follow-up goes out before a brand-new first email.
+            followups = get_followup_candidates(FOLLOWUP_AFTER_DAYS, limit=1) if FOLLOWUP_ENABLED else []
+            is_followup = bool(followups)
+
+            if not pending and not followups:
+                _scheduler_state["next_send_time"] = "Queue empty (waiting for approved leads...)"
                 time.sleep(60)
                 continue
 
-            # Pick the first pending lead to send
-            biz = pending[0]
+            # Pick the lead to send
+            biz = followups[0] if is_followup else pending[0]
 
             # Timezone-aware send timing: only send during business hours
             lead_tz = get_lead_timezone(biz.get("address", ""))
@@ -98,13 +110,19 @@ def _interval_worker_loop():
                 time.sleep(min(wait_secs, 3600))  # Re-check at least every hour
                 continue
 
+            if is_followup:
+                subject, body = build_followup(biz)
+            else:
+                subject, body = biz["pitch_subject"], biz["pitch_body"]
+
             success, err = send_email(
                 place_id=biz["place_id"],
                 to_email=biz["email"],
-                subject=biz["pitch_subject"],
-                body_text=biz["pitch_body"],
+                subject=subject,
+                body_text=body,
                 rating=biz.get("rating"),
                 review_count=biz.get("review_count"),
+                is_followup=is_followup,
             )
             if not success:
                 _scheduler_state["last_error"] = err
@@ -127,8 +145,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    thread = Thread(target=_interval_worker_loop, daemon=True)
-    thread.start()
+    if AUTO_SEND_EMAILS:
+        thread = Thread(target=_interval_worker_loop, daemon=True)
+        thread.start()
+    else:
+        _scheduler_state["next_send_time"] = "Auto-send is off (set AUTO_SEND_EMAILS=true in .env)"
+        logger.info("AUTO_SEND_EMAILS is off: drafts are saved but nothing is sent automatically.")
     yield
 
 
@@ -249,7 +271,7 @@ async def get_scheduler_status():
         "is_running": _scheduler_state["is_running"],
         "scheduled_count": len(pending),
         "daily_sent_total": sent_today,
-        "daily_limit": 20,
+        "daily_limit": MAX_DAILY_EMAILS,
         "next_send_time": _scheduler_state["next_send_time"] or ("Queue empty" if not pending else "Calculating..."),
         "last_error": _scheduler_state.get("last_error")
     }
@@ -356,7 +378,7 @@ async def suggest_target():
         prompt = (
             "I run a web design agency building sites for local business owners. "
             "Suggest ONE high-ticket, low-tech local niche ($2k+ per customer value, e.g. Roofers, Solar, Tree Removal, Paving, Plumbing, Electricians, Medi-Spas) "
-            "and ONE growing city in US, UK, Canada, or Australia. "
+            f"and ONE growing city in one of these countries: {', '.join(OUTREACH_COUNTRIES_DISPLAY)}. "
             f"CRITICAL: Do NOT suggest any of these already searched targets: {json.dumps(recent_list)}. "
             "Format output as raw JSON with no markdown:\n"
             '{"query": "Solar Installers", "location": "Austin, Texas, USA"}'
@@ -529,8 +551,8 @@ async def run_daily_campaign(request: Request):
 @app.post("/api/leads/{place_id}/status")
 async def update_lead_status(place_id: str, payload: dict):
     """Manually mark a lead as contacted or rejected from the UI."""
-    status = payload.get("status")  # 'sent' or 'rejected'
-    
+    status = payload.get("status")  # 'sent', 'approved', 'replied' or 'rejected'
+
     biz = get_business(place_id)
     if not biz:
         return {"error": "not found"}
@@ -538,12 +560,38 @@ async def update_lead_status(place_id: str, payload: dict):
     if status == "sent":
         biz["send_status"] = "sent"
         biz["approval_status"] = "approved"
+    elif status == "approved":
+        # Human sign-off: the auto-sender only picks up approved leads.
+        biz["approval_status"] = "approved"
+    elif status == "replied":
+        # Stops any follow-up for this lead.
+        biz["approval_status"] = "replied"
     elif status == "rejected":
         biz["approval_status"] = "rejected"
-    
+    else:
+        return {"error": f"unknown status '{status}'"}
+
     upsert_business(biz)
 
     return {"success": True, "send_status": biz["send_status"], "approval_status": biz["approval_status"]}
+
+
+@app.get("/api/call-list")
+async def call_list(min_score: int = 0, limit: int = 50, format: str = "json"):
+    """Phone-first call sheet: best leads that have a phone number, each with
+    a short opener. Use ?format=csv to download it."""
+    rows = build_call_sheet(get_call_list(min_score=min_score, limit=min(max(limit, 1), 500)))
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=CALL_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=call-list.csv"},
+        )
+    return {"count": len(rows), "leads": rows}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────
@@ -745,7 +793,7 @@ def _process_single_business(run_id: str, graph_app, business: dict,
     quality = result.get("website_quality")
     score = result.get("lead_score")
 
-    if quality == "good":
+    if quality in ("good", "unknown"):
         run["stats"]["good_website"] += 1
         _broadcast(run_id, {
             "type": "drafted",
@@ -758,7 +806,7 @@ def _process_single_business(run_id: str, graph_app, business: dict,
 
     run["stats"]["qualified"] += 1
     if result.get("email"):
-        if is_business_already_processed("", "", result["email"]):
+        if is_business_already_processed("", "", result["email"], exclude_place_id=place_id):
             logger.info(f"Skipping {name} — duplicate email {result['email']} already processed.")
             result["send_status"] = "skipped_duplicate"
             upsert_business(result)

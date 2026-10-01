@@ -1,0 +1,28 @@
+# Sample emails that show Gemini the voice and structure you want.
+# REPLACE THESE with 2 or 3 emails written in your own words. They are fed to
+# the model verbatim as style references, so the closer they sound like you,
+# the less the drafts read like a template. Keep the placeholders' details
+# invented: the model is told never to copy facts from the examples.
+# Lines starting with # are ignored. Separate examples with a line of ---
+
+Subject: Quick question about Harbor Plumbing's website
+
+Hi Dana,
+
+I was looking up plumbers in Tacoma and Harbor Plumbing stood out: 212 reviews at 4.8 is rare. When I opened your site on my phone, though, it took about 7 seconds before anything showed up, and most people give up well before that.
+
+I build small business websites. If it's useful I can send two or three specific things that would make it load faster. No charge for that.
+
+Would you want me to send them over?
+
+---
+
+Subject: Harbor Plumbing on Google
+
+Hi there,
+
+Your Google listing for Harbor Plumbing has 212 reviews and a 4.8 rating, but it links to a Facebook page instead of a website. Someone searching "plumber near me" who wants to book online has nowhere to go.
+
+I build simple, fast websites for local trades. Happy to send a short note on what a basic site for you would include and what it would cost.
+
+Is that something you'd want to see?

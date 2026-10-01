@@ -110,11 +110,11 @@
     if (!quality) return '';
     const map = {
       none: 'none', dead: 'dead', social_only: 'social',
-      outdated: 'outdated', good: 'good',
+      outdated: 'outdated', good: 'good', unknown: 'outdated',
     };
     const labels = {
       none: 'No Site', dead: 'Dead', social_only: 'Social Only',
-      outdated: 'Outdated', good: 'Good',
+      outdated: 'Outdated', good: 'Good', unknown: 'Unchecked (blocked)',
     };
     const cls = map[quality] || 'none';
     return `<span class="quality-badge quality-badge--${cls}">${labels[quality] || quality}</span>`;
@@ -124,13 +124,13 @@
     if (!status) return '';
     const map = {
       pending: 'pending', approved: 'approved', sent: 'sent',
-      rejected: 'rejected', skipped: 'skipped',
+      rejected: 'rejected', skipped: 'skipped', replied: 'approved', simulated: 'skipped',
       not_sent: 'pending', no_email: 'skipped', failed: 'rejected',
       pending_auto_send: 'approved',
     };
     const labels = {
       pending: '⏳ Pending', approved: '✓ Approved', sent: '✉ Contacted',
-      rejected: '✕ Rejected', skipped: '⏭ Skipped',
+      rejected: '✕ Rejected', skipped: '⏭ Skipped', replied: '💬 Replied', simulated: '⚠ Not sent (no email credentials)',
       not_sent: '⏳ Pending', no_email: '⏭ No Email', failed: '✕ Failed',
       pending_auto_send: '⚡ Auto-Queue',
     };
@@ -224,7 +224,7 @@
         <td>${qualityBadge(l.website_quality)}</td>
         <td class="leads-table__email">${l.email ? esc(l.email) : '<span style="color:var(--text-muted)">—</span>'}</td>
         <td>${l.facebook_url ? '📘' : ''}${l.instagram_url ? ' 📷' : ''}</td>
-        <td>${l.open_count > 0 ? `<span class="status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">👀 Opened (${l.open_count})</span>` : statusBadge(l.send_status === 'sent' ? 'sent' : (l.send_status === 'pending_auto_send' ? 'pending_auto_send' : l.approval_status))}</td>
+        <td>${l.open_count > 0 ? `<span class="status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">👀 Opened (${l.open_count})</span>` : statusBadge(l.send_status === 'sent' ? 'sent' : (l.send_status === 'pending_auto_send' && l.approval_status === 'approved' ? 'pending_auto_send' : l.approval_status))}</td>
         <td>
           ${showReview
             ? `<button class="btn btn--primary btn--sm" onclick="window.__openModal('${esc(l.place_id)}')">Review</button>`
@@ -371,6 +371,8 @@
   });
   
   $('#btnCopy').addEventListener('click', copyPitch);
+  $('#btnApprove').addEventListener('click', () => updateStatus('approved'));
+  $('#btnReplied').addEventListener('click', () => updateStatus('replied'));
   $('#btnContacted').addEventListener('click', () => updateStatus('sent'));
   $('#btnReject').addEventListener('click', () => updateStatus('rejected'));
 

@@ -1,27 +1,40 @@
 """
 Node: check_website
 
-Classifies the business's web presence into one of five levels:
+Classifies the business's web presence into one of six levels:
 
   "none"        — no URL listed at all
-  "social_only" — URL is just a Facebook/Instagram/Linktree page
-  "dead"        — URL returns errors or times out
+  "social_only" — URL is just a Facebook/Instagram/Linktree page or a
+                  directory listing (Yelp, Yellow Pages, ...)
+  "dead"        — URL returns errors or the domain does not resolve
   "outdated"    — URL works but has red flags (ancient CMS, no mobile
                   viewport, old copyright year, under construction)
+  "unknown"     — we could not tell: the site blocked us (403/429/WAF
+                  challenge) or the connection timed out or was reset
   "good"        — a real, functional, reasonably modern website
 
-Only "good" websites cause the pipeline to skip a business entirely.
-Everything else is a prospect worth enriching.
+"good" and "unknown" sites are not pitched. An unknown site is NOT a good
+site: a bot firewall or a slow connection from the operator's country says
+nothing about the site itself, so those leads are kept for manual review
+instead of being silently discarded as good.
 """
 import re
 from datetime import datetime
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
 from state import BusinessState
 
-SOCIAL_ONLY_HOSTS = ("facebook.com", "instagram.com", "wa.me", "linktr.ee")
+SOCIAL_ONLY_HOSTS = (
+    "facebook.com", "instagram.com", "wa.me", "linktr.ee",
+    "tiktok.com", "linkedin.com",
+    # directory listings are not a business's own website
+    "yelp.com", "yellowpages.com", "angi.com", "angieslist.com", "thumbtack.com",
+    "homeadvisor.com", "bbb.org", "nextdoor.com", "mapquest.com", "manta.com",
+    "houzz.com", "porch.com", "yell.com", "checkatrade.com", "trustatrader.com",
+)
 
 # CMS generator strings that signal an outdated site
 _OUTDATED_CMS_PATTERNS = (
@@ -108,6 +121,43 @@ def _check_quality(html: str) -> tuple[str, str]:
     return "good", "Live, modern website"
 
 
+_BLOCKED_STATUSES = (401, 403, 406, 429, 503, 509, 520, 521, 522, 523, 524, 525)
+_DNS_FAILURE_HINTS = (
+    "name or service not known", "nodename nor servname", "getaddrinfo failed",
+    "temporary failure in name resolution", "nameresolutionerror", "no address associated",
+)
+
+
+def _is_social_or_directory(website: str) -> bool:
+    host = (urlparse(website if "//" in website else f"//{website}").hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in SOCIAL_ONLY_HOSTS)
+
+
+def _fetch(website: str) -> requests.Response:
+    """GET the site, retrying once on timeouts/connection resets (home and
+    foreign connections are flaky and get rate-limited by CDNs)."""
+    last_exc: Exception | None = None
+    for _ in range(2):
+        try:
+            return requests.get(
+                website, timeout=12, allow_redirects=True,
+                headers=REAL_BROWSER_HEADERS,
+            )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError,
+                requests.exceptions.SSLError) as e:
+            err = str(e).lower()
+            # DNS failure and certificate errors are real answers, don't retry.
+            if any(h in err for h in _DNS_FAILURE_HINTS) or "certificate" in err:
+                raise
+            last_exc = e
+    assert last_exc is not None
+    raise last_exc
+
+
+def _unknown(note: str) -> dict:
+    return {"has_real_website": True, "website_quality": "unknown", "website_notes": note}
+
+
 def check_website(state: BusinessState) -> dict:
     website = state.get("website")
 
@@ -118,10 +168,9 @@ def check_website(state: BusinessState) -> dict:
             "website_notes": "No website URL listed in Google Maps",
         }
 
-    # A Facebook/Instagram/Linktree link isn't a real website for our
-    # purposes — it's still a business worth pitching a proper site to.
-    if any(host in website for host in SOCIAL_ONLY_HOSTS):
-        # Extract the social URL for later use
+    # A Facebook/Instagram/directory link isn't a real website for our
+    # purposes. It's still a business worth pitching a proper site to.
+    if _is_social_or_directory(website):
         social_data = {"has_real_website": False, "website_quality": "social_only"}
         if "facebook.com" in website:
             social_data["facebook_url"] = website
@@ -130,62 +179,49 @@ def check_website(state: BusinessState) -> dict:
             social_data["instagram_url"] = website
             social_data["website_notes"] = "Website is just an Instagram page"
         else:
-            social_data["website_notes"] = f"Website is just a social link: {website}"
+            social_data["website_notes"] = f"Website is just a social or directory link: {website}"
         return social_data
 
-    # Try to fetch the actual page with realistic desktop browser headers
     try:
-        resp = requests.get(
-            website, timeout=10, allow_redirects=True,
-            headers=REAL_BROWSER_HEADERS,
-        )
-        if resp.status_code in (403, 406, 429, 503, 509, 520, 521, 522, 523, 524, 525):
+        resp = _fetch(website)
+    except requests.exceptions.SSLError as e:
+        err = str(e).lower()
+        if "certificate" in err:
             return {
                 "has_real_website": True,
-                "website_quality": "good",
-                "website_notes": f"Live website (protected by firewall/bot defense: HTTP {resp.status_code})",
+                "website_quality": "outdated",
+                "website_notes": "SSL certificate error (browsers warn visitors away)",
             }
-        if resp.status_code >= 400:
+        return _unknown(f"TLS handshake failed, likely a bot firewall: {type(e).__name__}")
+    except requests.exceptions.ConnectionError as e:
+        if any(h in str(e).lower() for h in _DNS_FAILURE_HINTS):
             return {
                 "has_real_website": False,
                 "website_quality": "dead",
-                "website_notes": f"HTTP {resp.status_code}",
+                "website_notes": "Domain does not resolve",
             }
-        
-        # Check if page content returned a Cloudflare or WAF challenge page despite HTTP 200/300
-        text_lower = resp.text.lower()[:5000]
-        for phrase in _WAF_PHRASES:
-            if phrase in text_lower:
-                return {
-                    "has_real_website": True,
-                    "website_quality": "good",
-                    "website_notes": "Live website (protected by Cloudflare/WAF challenge)",
-                }
-
-    except (requests.exceptions.SSLError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
-        # Some WAFs (like Cloudflare or Sucuri) drop TLS/TCP connections from automated crawlers or foreign VPS IPs
-        err_str = str(e).lower()
-        if "ssl" in err_str or "handshake" in err_str or "read timed out" in err_str or "reset by peer" in err_str:
-            return {
-                "has_real_website": True,
-                "website_quality": "good",
-                "website_notes": f"Live website (bot/location firewall dropped connection: {type(e).__name__})",
-            }
-        return {
-            "has_real_website": False,
-            "website_quality": "dead",
-            "website_notes": f"Connection failed: {type(e).__name__}",
-        }
+        return _unknown(f"Connection dropped, could not check: {type(e).__name__}")
+    except requests.exceptions.Timeout as e:
+        return _unknown(f"Timed out twice, could not check: {type(e).__name__}")
     except requests.RequestException as e:
+        return _unknown(f"Request failed, could not check: {type(e).__name__}")
+
+    if resp.status_code in _BLOCKED_STATUSES:
+        return _unknown(f"Blocked our check (HTTP {resp.status_code}), needs a manual look")
+    if resp.status_code >= 400:
         return {
             "has_real_website": False,
             "website_quality": "dead",
-            "website_notes": f"Connection failed: {type(e).__name__}",
+            "website_notes": f"HTTP {resp.status_code}",
         }
 
-    # Page loaded — analyze quality
-    quality, notes = _check_quality(resp.text)
+    # A WAF challenge page can come back as HTTP 200
+    text_lower = resp.text.lower()[:5000]
+    for phrase in _WAF_PHRASES:
+        if phrase in text_lower:
+            return _unknown("Bot/WAF challenge page, could not read the site")
 
+    quality, notes = _check_quality(resp.text)
     return {
         "has_real_website": quality == "good",
         "website_quality": quality,

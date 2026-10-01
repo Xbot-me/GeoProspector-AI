@@ -6,6 +6,7 @@ across the US and globally.
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from config import OUTREACH_COUNTRIES
 from db import get_conn
 
 HOME_SERVICE_NICHES = [
@@ -217,14 +218,26 @@ def seconds_until_next_window(timezone_str: str) -> int:
     return _seconds_to(next_monday)
 
 
+def active_cities() -> list[tuple[str, str]]:
+    """TARGET_CITIES limited to the countries in OUTREACH_COUNTRIES. Cold B2B
+    email needs prior consent in much of the EU and for UK sole traders, so
+    the default is USA, Canada and Australia. See config.OUTREACH_COUNTRIES."""
+    allowed = set(OUTREACH_COUNTRIES)
+    return [
+        (city, region) for city, region in TARGET_CITIES
+        if region.rsplit(",", 1)[-1].strip().lower() in allowed
+    ]
+
+
 def get_all_target_combinations() -> list[dict]:
     """
     Return diverse, interleaved (niche, city) combinations so sequential runs
     automatically rotate BOTH category and geography on every run.
     """
     combos = []
+    cities = active_cities()
     num_niches = len(HOME_SERVICE_NICHES)
-    num_cities = len(TARGET_CITIES)
+    num_cities = len(cities)
     # Generate interleaved combinations across niches and cities
     max_combos = num_niches * num_cities
 
@@ -233,7 +246,7 @@ def get_all_target_combinations() -> list[dict]:
         niche = HOME_SERVICE_NICHES[i % num_niches]
         # Shift city index by niche multiplier to ensure full coverage without clustering
         city_idx = (i + (i // num_niches)) % num_cities
-        city_name, state_country = TARGET_CITIES[city_idx]
+        city_name, state_country = cities[city_idx]
         combos.append({
             "query": niche,
             "location": f"{city_name}, {state_country}",

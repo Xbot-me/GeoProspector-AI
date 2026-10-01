@@ -1,95 +1,110 @@
-# GeoProspector AI — Local Lead Generation & Automated Outreach
+# GeoProspector AI
 
-**GeoProspector AI** (formerly Maps Outreach Agent) is a powerful, self-hosted LangGraph agent and web dashboard designed to automate B2B lead generation. It scrapes Google Maps to find local businesses, enriches them with contact information, scores their digital presence, and uses AI to draft hyper-personalized cold outreach pitches.
+A self-hosted tool that finds local businesses with a weak web presence, checks their website, finds a contact, and drafts a short personal pitch you can review and send, or use as a phone script.
 
-Whether you run a web design agency, a marketing firm, or a SaaS company, GeoProspector AI allows you to instantly find high-ticket local clients (like roofers, HVAC contractors, and medi-spas) and extract their data with a single click.
+It runs on Google Maps data (Places API), a LangGraph pipeline, Gemini for the writing, PostgreSQL for storage, and a small FastAPI dashboard.
 
-![GeoProspector AI Dashboard](https://img.shields.io/badge/Status-Active-success) ![License](https://img.shields.io/badge/License-MIT-blue)
+Nothing is sent without your approval. Auto-send is off by default.
 
----
+## What it does
 
-## 🚀 Key Features
+1. **Search.** Pulls up to 60 businesses per query (3 pages) from the Google Places API, skipping closed ones and duplicates.
+2. **Check the website.** Classifies each business as `none`, `social_only` (Facebook, Instagram, Yelp and similar), `dead`, `outdated`, `good` or `unknown`.
+   `unknown` means the site blocked the check or timed out. Those leads are kept for a manual look instead of being thrown away as "good".
+3. **Audit live sites.** Runs the free Google PageSpeed API on the mobile version. A site that scores under 50 becomes a prospect, and the exact numbers go into the pitch.
+4. **Find a contact.** Scrapes the site, then DuckDuckGo, then Hunter.io if you set a key. Addresses are ranked: a named person at the business's own domain beats `info@`, and `noreply@` style addresses are dropped. Then an MX check.
+5. **Score.** 0 to 100, favouring businesses with a good reputation and a visible gap.
+6. **Draft.** Gemini writes a short email built around one concrete finding ("on a phone your site scores 31/100 and takes 6 s to show anything"). It returns three subject lines and the plainest one is kept. Drafts are cleaned of em dashes and exclamation marks.
+7. **You review.** Open a lead in the dashboard and press **Approve to send**, **Mark contacted**, **Replied** or **Reject**.
+8. **Send and follow up.** If you turn auto-send on, approved leads go out at business hours in the lead's timezone, up to your daily cap. One short follow-up goes out after 5 days unless the lead replied, was rejected or unsubscribed. Then it stops.
+9. **Call list.** `GET /api/call-list` (add `?format=csv` to download) returns leads with a phone number, best first, each with a short opener. For local trades businesses, a phone call often beats cold email.
 
-* **Intelligent Google Maps Scraping:** Uses the new Google Places API to find highly targeted local businesses in specific geographic radii.
-* **Built-in AI Niche Generator:** Don't know who to target? The built-in Gemini AI niche generator brainstorms high-ticket, low-tech industries in booming US cities and auto-fills your search.
-* **Deep Data Enrichment:** Automatically scrapes websites, searches DuckDuckGo, and queries Hunter.io to find owner names, emails, Facebook pages, and Instagram profiles.
-* **Automated Website Auditing:** Analyzes business websites to detect outdated CMS versions, missing mobile optimization, parked domains, or "social-only" businesses with no real website.
-* **Smart Lead Scoring:** Ranks prospects from 0-100 based on review count, rating, digital presence, and website quality so you can focus on the warmest leads.
-* **AI-Personalized Cold Emails:** Uses Google's Gemini AI to write highly personalized, honest outreach pitches based on the business's actual Google reviews and website status.
-* **Auto-CSV Export:** Automatically saves all extracted data and generated pitches to a CSV file on your server for easy import into your CRM.
-* **Beautiful Web Dashboard:** A sleek, dark-mode real-time UI built with FastAPI and WebSockets to monitor the pipeline as it hunts for leads.
-
-## 🛠️ Tech Stack
-- **Backend:** Python, FastAPI, LangGraph, PostgreSQL
-- **Frontend:** Vanilla HTML/CSS/JS (WebSockets for real-time updates)
-- **AI Integrations:** Google Gemini (Flash-Lite), Google Places API (New)
-- **Deployment:** Docker, Docker Compose (with PostgreSQL 16 service)
-
----
-
-## 📦 Setup & Installation
-
-GeoProspector AI is built for easy local usage or production deployment to a VPS.
-
-### Option 1: Run Locally
+## Run it on your PC
 
 ```bash
-git clone https://github.com/your-username/geoprospector-ai.git
-cd geoprospector-ai
-python3 -m venv venv
-source venv/bin/activate
+git clone https://github.com/Xbot-me/GeoProspector-AI.git
+cd GeoProspector-AI
+cp .env.example .env          # then fill it in
+
+# Postgres in Docker, app in Python
+docker compose -f docker-compose.local.yml up -d db
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+python app.py                 # http://localhost:8000
 ```
 
-Edit your `.env` file and add your `GOOGLE_PLACES_API_KEY` and `GEMINI_API_KEY`.
+Or run everything in Docker: `docker compose -f docker-compose.local.yml up -d --build`.
 
-Start the server:
+`docker-compose.yml` is the VPS setup (Caddy and an external `securemonitor_default` network). It is what `.github/workflows/deploy.yml` uses.
+
+### What you need in `.env`
+
+| Key | Needed for | Cost |
+|---|---|---|
+| `GOOGLE_PLACES_API_KEY` | Search | Free up to about 5,000 searches a month, but Google requires a billing account (card) on the project. |
+| `GEMINI_API_KEY` | Drafting | Free tier, no card: https://aistudio.google.com |
+| `DATABASE_URL` | Storage | Free (local Postgres) |
+| `ADMIN_PASSWORD` | Dashboard login | A random one is printed at startup if empty |
+| `RESEND_API_KEY` or SMTP settings | Sending | Free tiers exist. Only needed if you turn auto-send on |
+
+Optional: `PAGESPEED_API_KEY` (higher rate limit for the audit), `HUNTER_API_KEY`. Everything is documented in `.env.example`.
+
+Each Places page counts as one billable call, and `MAX_PLACES_CALLS_PER_MONTH` (default 4000) stops the app before the free tier runs out. That counter is local. Also set a budget alert in Google Cloud.
+
+## Sending email without ending up in spam
+
+Cold email is the easy part to get wrong. Before you turn on `AUTO_SEND_EMAILS`:
+
+- **Use a separate sending domain or subdomain**, not your main business domain. Set SPF, DKIM and DMARC on it.
+- **Warm it up** for 3 to 4 weeks before cold sends. Start at 5 to 10 emails a day (`MAX_DAILY_EMAILS`, default 10).
+- **Unsubscribe links.** On a PC the app has no public URL, so leave `UNSUBSCRIBE_BASE_URL` empty. Emails then carry a `mailto:` unsubscribe, and open tracking is off. If you expose the app (for example through a Cloudflare Tunnel), set `UNSUBSCRIBE_BASE_URL` for one-click unsubscribe and open tracking.
+- **Simulated sends.** With no Resend or SMTP credentials the app prints what it would send and records the lead as `simulated`, not `sent`.
+- Keep spam complaints well under 0.3%. Gmail and Yahoo reject mail above that.
+
+## Who to email
+
+Cold B2B email is lawful with an opt-out in the US, Canada and Australia, among others. It needs prior consent in much of the EU (Germany, Spain, Italy and others) and for UK sole traders, and many trades businesses are sole traders. The default target list is limited to `OUTREACH_COUNTRIES=USA,Canada,Australia`. Check the rules for any country you add. This is not legal advice.
+
+Every email includes your physical address (`SENDER_PHYSICAL_ADDRESS`) and an unsubscribe option, as CAN-SPAM requires.
+
+Also be aware of the Google Maps Platform terms on caching and storing business data. Use this for your own lead generation, not for building a redistributable database.
+
+## Writing better drafts
+
+The prompt shows Gemini the sample emails in `prompts/pitch_examples.txt`. **Replace them with 2 or 3 emails in your own voice.** The closer they sound like you, the less the drafts read like a template.
+
+Other knobs: `OUTREACH_LANGUAGE` (default English, or `auto`), `OFFER_FREE_MOCKUP` (off: only turn it on if you will build one for every reply), `FOLLOWUP_AFTER_DAYS`.
+
+## Project layout
+
+```
+app.py              FastAPI dashboard, API, background sender
+graph.py            LangGraph pipeline
+nodes/              check_website, audit_site, find_email, find_socials,
+                    score_lead, analyze_business, generate_pitch, save_to_crm,
+                    places_search
+email_sender.py     Resend / SMTP delivery and the HTML layout
+followup.py         the one follow-up email
+callscript.py       call list rows and openers
+db.py               PostgreSQL schema and queries
+prompts/            editable style examples for the drafter
+tests/              pytest suite
+```
+
+## Tests
+
 ```bash
-python app.py
+pip install -r requirements-dev.txt
+python -m pytest tests -q                       # unit tests only (DB tests are skipped)
+TEST_DATABASE_URL=postgresql://appuser:secretpassword@localhost:5432/geoprospector_test \
+  python -m pytest tests -q                     # everything
 ```
-Open `http://localhost:8000` in your browser to access the dashboard.
 
-### Option 2: Deploy to VPS (Docker Compose + Caddy)
+The database tests truncate tables, so they only run against `TEST_DATABASE_URL`, never your real `DATABASE_URL`.
 
-The repository includes a production-ready `Dockerfile` running as a non-root user for security, and a `docker-compose.yml` configured to run behind a reverse proxy without exposing host ports.
+## Tech stack
 
-1. Clone the repository on your VPS.
-2. Configure your `.env` file.
-3. Run Docker Compose:
-```bash
-docker compose up -d --build
-```
-4. If using Caddy, add this block to your global Caddyfile:
-```caddyfile
-leads.yourdomain.com {
-    reverse_proxy maps-outreach-agent:8000
-}
-```
+Python, FastAPI, LangGraph, PostgreSQL 16, Google Places API (New), Google PageSpeed Insights, Gemini (Flash-Lite), Docker.
 
 ---
-
-## 🧠 How the LangGraph Pipeline Works
-
-GeoProspector AI isn't just a scraper; it's an intelligent multi-agent pipeline. For every business found on Google Maps, the agent executes the following workflow:
-
-1. **Website Check:** Determines if the business has a modern website, an outdated website, or no website at all.
-2. **Contact Discovery:** Runs multi-stage enrichment to hunt down the business owner's email and social media links.
-3. **Lead Scoring:** Assigns a composite score. If the business already has a fantastic website, it skips generating a pitch but still extracts the data.
-4. **AI Pitch Generation:** If the lead is qualified, the agent generates a custom cold email referencing their specific Google reviews and website flaws (e.g., pitching a modernization vs. a brand-new build).
-5. **Database Storage:** Saves the business and the pitch to a PostgreSQL database and auto-exports to a CSV file.
-
-## 💰 API Costs & Free Tiers
-
-This tool is designed to cost **$0/month** to run:
-- **Google Places API:** You get 5,000 free search calls per month. (Note: A 100-business search costs only 5 API calls due to pagination).
-- **Gemini API:** Uses the Gemini free tier (1,500 requests/day).
-- **DuckDuckGo:** Free web search scraping.
-
-## ⚠️ Compliance & Terms of Service
-
-* **CAN-SPAM / GDPR:** If you decide to send cold emails to the leads generated by this tool, you must ensure you comply with CAN-SPAM laws (e.g., including an unsubscribe option and physical address) and GDPR regulations for B2B outreach in Europe.
-* **Google Maps ToS:** Be aware of the Google Maps API Terms of Service regarding the caching and long-term storage of business data. This tool is intended for personal lead generation and direct outreach, not for building public redistributable databases.
-
----
-*Built for local service web designers and B2B growth hackers.*
+*Built for freelance web developers and small agencies selling to local service businesses.*

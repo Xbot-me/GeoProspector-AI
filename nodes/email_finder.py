@@ -36,6 +36,48 @@ _IGNORE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js")
 
 _CONTACT_PATHS = ("/contact", "/about", "/contact-us", "/about-us", "/team")
 
+# Local parts that never reach a person who can say yes.
+_USELESS_LOCALS = (
+    "noreply", "no-reply", "donotreply", "do-not-reply", "mailer-daemon",
+    "postmaster", "abuse", "webmaster", "privacy", "unsubscribe",
+    "bounce", "notifications", "wordpress", "admin@wordpress",
+)
+# Shared inboxes: fine as a last resort, worse than a named person.
+_GENERIC_LOCALS = (
+    "info", "contact", "hello", "office", "admin", "support", "sales",
+    "enquiries", "inquiries", "enquiry", "mail", "service", "team", "help",
+)
+
+
+def rank_emails(emails: list[str], site_domain: str | None = None) -> list[str]:
+    """Order candidate addresses best-first and drop ones nobody reads.
+
+    Best: an address at the business's own domain that looks like a person
+    (owner@, john@). Then generic inboxes (info@) at the business's domain.
+    Then anything else (e.g. a gmail address listed on a directory page).
+    """
+    site_domain = (site_domain or "").lower().removeprefix("www.")
+
+    def local(e: str) -> str:
+        return e.split("@")[0]
+
+    def score(e: str) -> int:
+        domain = e.split("@")[-1]
+        on_domain = bool(site_domain) and (
+            domain == site_domain or domain.endswith("." + site_domain)
+        )
+        generic = local(e) in _GENERIC_LOCALS
+        if on_domain and not generic:
+            return 0
+        if on_domain:
+            return 1
+        if not generic:
+            return 2
+        return 3
+
+    kept = [e for e in emails if not any(local(e).startswith(u) for u in _USELESS_LOCALS)]
+    return sorted(dict.fromkeys(kept), key=score)  # stable: keeps page order on ties
+
 
 def _extract_emails_from_text(text: str) -> list[str]:
     """Find valid email addresses in raw text/HTML."""
@@ -61,12 +103,14 @@ def _extract_domain(url: str | None) -> str | None:
 
 
 def _scrape_website_emails(website: str) -> str | None:
-    """Check the business website and its contact/about pages for emails."""
+    """Check the business website and its contact/about pages for emails and
+    return the best one (a named person at the site's own domain beats info@)."""
     urls_to_check = [website]
     base = website.rstrip("/")
     for path in _CONTACT_PATHS:
         urls_to_check.append(f"{base}{path}")
 
+    found: list[str] = []
     for url in urls_to_check:
         try:
             resp = requests.get(
@@ -74,12 +118,11 @@ def _scrape_website_emails(website: str) -> str | None:
                 headers=REAL_BROWSER_HEADERS,
             )
             if resp.status_code < 400:
-                emails = _extract_emails_from_text(resp.text)
-                if emails:
-                    return emails[0]
+                found.extend(_extract_emails_from_text(resp.text))
         except requests.RequestException:
             continue
-    return None
+    ranked = rank_emails(found, _extract_domain(website))
+    return ranked[0] if ranked else None
 
 
 def _search_web_for_email(name: str, address: str) -> str | None:
@@ -109,7 +152,7 @@ def _search_web_for_email(name: str, address: str) -> str | None:
                 for result in results:
                     # Search in title + body snippet
                     text = f"{result.get('title', '')} {result.get('body', '')}"
-                    emails = _extract_emails_from_text(text)
+                    emails = rank_emails(_extract_emails_from_text(text))
                     if emails:
                         return emails[0]
     except Exception as e:

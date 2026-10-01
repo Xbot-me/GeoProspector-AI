@@ -26,6 +26,8 @@ def save_to_crm(state: BusinessState) -> dict:
         "review_count": state.get("review_count"),
         "website_quality": state.get("website_quality"),
         "website_notes": state.get("website_notes"),
+        "pagespeed_score": state.get("pagespeed_score"),
+        "pagespeed_lcp": state.get("pagespeed_lcp"),
         "facebook_url": state.get("facebook_url"),
         "instagram_url": state.get("instagram_url"),
         "owner_name": state.get("owner_name"),

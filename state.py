@@ -18,8 +18,12 @@ class BusinessState(TypedDict, total=False):
 
     # Website analysis
     has_real_website: bool
-    website_quality: Optional[str]   # "none" | "dead" | "social_only" | "outdated" | "good"
+    website_quality: Optional[str]   # "none" | "dead" | "social_only" | "outdated" | "unknown" | "good"
     website_notes: Optional[str]     # details about what was found
+
+    # Performance audit (Google PageSpeed Insights, mobile)
+    pagespeed_score: Optional[int]   # 0-100
+    pagespeed_lcp: Optional[str]     # e.g. "6.2 s"
 
     # Email discovery (multi-source)
     email: Optional[str]

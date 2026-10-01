@@ -2,22 +2,43 @@
 Node: generate_pitch
 
 Turns the analysis into a short, personalized outreach email using Gemini.
-Two tracks:
-  - "no website" / "dead" / "social_only" → pitch building a website
-  - "outdated" → pitch modernizing their existing website
 
-Critical rules baked into the prompt:
+What makes the drafts work (and not read like a template):
+  - Every email is anchored on ONE concrete, verifiable finding about the
+    business (see findings.describe_finding), never a generic "your site could be better".
+  - The model is shown style examples from prompts/pitch_examples.txt, which
+    you should replace with emails in your own voice.
+  - It returns three subject lines and we keep the plainest one.
+  - Output is cleaned (no em dashes, no exclamation marks) and length-capped.
+
+Rules baked into the prompt:
   - Never claim previous clients or fake experience
-  - Never fabricate portfolio links
+  - Never fabricate portfolio links or facts about the business
   - Use owner name if discovered
   - Reference their Google reviews as THEIR social proof
+  - Offer a free mockup only when OFFER_FREE_MOCKUP is on
 """
+import re
+from pathlib import Path
+
 from google import genai
 
-from config import GEMINI_API_KEY, GEMINI_MODEL, SENDER_NAME, SENDER_SIGNATURE
+from config import (
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    OFFER_FREE_MOCKUP,
+    OUTREACH_LANGUAGE,
+    SENDER_NAME,
+    SENDER_SIGNATURE,
+    SENDER_WEBSITE,
+)
+from findings import describe_finding
 from state import BusinessState
 
 _client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+EXAMPLES_PATH = Path(__file__).resolve().parent.parent / "prompts" / "pitch_examples.txt"
+MAX_WORDS = 120
 
 
 def _get_pitch_angle(state: BusinessState) -> str:
@@ -27,111 +48,169 @@ def _get_pitch_angle(state: BusinessState) -> str:
     return "no_website"
 
 
+def load_examples(path: Path = EXAMPLES_PATH) -> str:
+    """Style examples, comments stripped. Empty string if the file is missing."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    lines = [ln for ln in raw.splitlines() if not ln.lstrip().startswith("#")]
+    return "\n".join(lines).strip()
+
+
+def pick_subject(options: list[str], business_name: str = "") -> str:
+    """Prefer a short, plain subject that mentions the business by name."""
+    cleaned = [re.sub(r"^[\-\*\d\.\)\s]+", "", o).strip().strip('"') for o in options]
+    cleaned = [o for o in cleaned if o]
+    if not cleaned:
+        return f"Question about {business_name}'s website" if business_name else "Quick question"
+    name = business_name.lower()
+
+    def key(o: str) -> tuple:
+        words = len(o.split())
+        mentions = 0 if name and name in o.lower() else 1
+        too_long = 1 if words > 9 else 0
+        shouty = 1 if o.isupper() or "!" in o else 0
+        return (shouty, too_long, mentions, words)
+
+    return min(cleaned, key=key)
+
+
+def clean_body(body: str) -> str:
+    """Remove the punctuation tics that make drafts read as machine-written."""
+    body = body.replace("—", ",").replace("–", "-").replace("!", ".")
+    body = re.sub(r",\s*,", ",", body)
+    body = re.sub(r"[ \t]+\n", "\n", body)
+    body = re.sub(r"\n{3,}", "\n\n", body)
+    return body.strip()
+
+
 def _append_signature(body: str) -> str:
-    """Ensure the email body always ends with the exact sender signature."""
-    if "mustafizur.info" in body:
+    """Ensure the email body always ends with the configured sender signature."""
+    if SENDER_WEBSITE in body:
         return body
-    
-    for placeholder in ("[Your Name]", "[Your name]", "[your name]", "[YOUR NAME]", "Mustafizur Rahman"):
-        if placeholder in body:
+
+    for placeholder in ("[Your Name]", "[Your name]", "[your name]", "[YOUR NAME]", SENDER_NAME):
+        if placeholder and placeholder in body:
             return body.replace(placeholder, SENDER_SIGNATURE).strip()
 
     return f"{body.strip()}\n\n{SENDER_SIGNATURE}"
+
+
+def parse_response(text: str) -> tuple[str, list[str], str]:
+    """Split the model output into (language, subject options, body)."""
+    language = "English"
+    subjects: list[str] = []
+    body = text.strip()
+
+    m_lang = re.search(r"^LANGUAGE:\s*(.+)$", text, re.MULTILINE)
+    if m_lang:
+        language = m_lang.group(1).strip()
+
+    m_subj = re.search(r"^SUBJECTS?:\s*(.*?)^BODY:\s*", text, re.MULTILINE | re.DOTALL)
+    if m_subj:
+        subjects = [ln.strip() for ln in m_subj.group(1).splitlines() if ln.strip()]
+        body = text[m_subj.end():].strip()
+    elif "BODY:" in text:
+        body = text.split("BODY:", 1)[1].strip()
+
+    # a model sometimes puts a single "SUBJECT: x" inline
+    m_one = re.search(r"^SUBJECT:\s*(.+)$", text, re.MULTILINE)
+    if m_one and not subjects:
+        subjects = [m_one.group(1).strip()]
+    return language, subjects, body
+
+
+def build_prompt(state: BusinessState) -> str:
+    angle = _get_pitch_angle(state)
+    owner = state.get("owner_name")
+
+    personalization = []
+    rating = state.get("rating")
+    review_count = state.get("review_count")
+    if rating and review_count and review_count >= 10:
+        personalization.append(
+            f"They have {review_count} Google reviews with a {rating}/5 rating. "
+            "Mention it as THEIR achievement, not yours."
+        )
+    if owner:
+        personalization.append(f"The owner/manager's name appears to be {owner}. Address them by name.")
+    personalization_block = "\n".join(f"- {p}" for p in personalization) or "- No extra personalization data."
+
+    offer = (
+        "Offer to put together a free, no-obligation homepage mockup, and say you will only do it if they reply."
+        if OFFER_FREE_MOCKUP
+        else "Offer something small and free that you can deliver quickly for every reply, for example a short list "
+             "of specific fixes or a note on what a basic site for them would include. Do NOT promise a free website or mockup."
+    )
+
+    if OUTREACH_LANGUAGE.strip().lower() == "auto":
+        language_rule = (
+            f"Write in the primary local language of the business's location ({state.get('address')}). "
+            "Name that language on the LANGUAGE line."
+        )
+    else:
+        language_rule = f"Write the whole email in {OUTREACH_LANGUAGE}. Put {OUTREACH_LANGUAGE} on the LANGUAGE line."
+
+    examples = load_examples()
+    examples_block = (
+        f"\nSTYLE EXAMPLES (copy the voice and rhythm only, never their facts):\n{examples}\n" if examples else ""
+    )
+
+    goal = (
+        "pitch fixing or modernizing their existing website, not building one from scratch"
+        if angle == "outdated"
+        else "pitch a clean, fast, dedicated website so customers can find and contact them"
+    )
+
+    return f"""You write short cold emails for a solo web developer who contacts local businesses. Write one email to this business.
+
+Business name: {state.get('name')}
+Category: {state.get('category') or 'local business'}
+Location: {state.get('address')}
+
+THE ONE FINDING TO BUILD THE EMAIL AROUND (state it plainly, add no other claims about their site):
+{describe_finding(state)}
+
+Goal: {goal}.
+
+Background notes (use at most one detail, only if it is clearly relevant):
+{state.get('analysis')}
+
+Personalization:
+{personalization_block}
+{examples_block}
+STRUCTURE (no headings, no bullet points, 3 short paragraphs):
+1. One sentence of genuine, specific recognition, then the finding.
+2. What that likely costs them in plain terms (missed calls, customers leaving), in one or two sentences.
+3. {offer} End with one easy yes/no question.
+
+RULES:
+1. {language_rule}
+2. Never claim past clients, results, or portfolio links. Do not invent facts about the business.
+3. No clichés ("I hope this finds you well", "in today's digital landscape").
+4. Under {MAX_WORDS} words. Plain, conversational, like one person writing to another.
+5. No em dashes. No exclamation marks. No emojis.
+6. Do NOT write a sign-off or signature. End on the question.
+7. The email must work if read in five seconds.
+
+Output in EXACTLY this format, nothing else:
+LANGUAGE: <language name>
+SUBJECTS:
+<option 1: plain, under 8 words, mentions the business name>
+<option 2>
+<option 3>
+BODY:
+<email body>"""
 
 
 def generate_pitch(state: BusinessState) -> dict:
     if _client is None:
         raise RuntimeError("GEMINI_API_KEY is not set. Add it to your local .env file.")
 
-    angle = _get_pitch_angle(state)
-    owner = state.get("owner_name")
+    resp = _client.models.generate_content(model=GEMINI_MODEL, contents=build_prompt(state))
+    language, subjects, body = parse_response((resp.text or "").strip())
 
-    # Build personalization context
-    personalization = []
-    rating = state.get("rating")
-    review_count = state.get("review_count")
-    if rating and review_count and review_count >= 10:
-        personalization.append(
-            f"They have {review_count} Google reviews with a {rating}/5 rating "
-            f"— reference this as THEIR achievement, not yours."
-        )
-    if state.get("facebook_url"):
-        personalization.append(
-            "They have a Facebook page — acknowledge they're doing some online marketing."
-        )
-    if owner:
-        personalization.append(
-            f"The owner/manager's name appears to be {owner} — address them by name."
-        )
-
-    personalization_block = "\n".join(f"- {p}" for p in personalization) if personalization else "No extra personalization data available."
-
-    if angle == "outdated":
-        situation = (
-            "This business HAS a website but it has flaws or looks outdated. "
-            f"Specific issues found: {state.get('website_notes', 'various technical/UX red flags')}. "
-            "Pitch modernizing or fixing their site, NOT creating one from scratch."
-        )
-    else:
-        situation = (
-            "This business has NO website (or relies solely on social media like Facebook/Instagram). "
-            "Pitch building a clean, modern, dedicated website for them so customers can easily find them on Google."
-        )
-
-    prompt = f"""You are an elite, human cold-email copywriter and native linguist. Write a short, highly compelling cold outreach email pitching web development services to this business.
-
-Business name: {state.get('name')}
-Category: {state.get('category') or 'local service business'}
-Location: {state.get('address')}
-
-Situation: {situation}
-
-Analysis notes to draw from:
-{state.get('analysis')}
-
-Personalization data:
-{personalization_block}
-
-COPYWRITING FRAMEWORK — "Value-First Mockup Offer":
-1. Compliment Hook: Start by acknowledging their hard-earned reputation (e.g., mention their Google rating/reviews or local standing as THEIR achievement).
-2. Friction Point: Explain specifically WHY their website state (e.g., HTTP error, outdated design, slow mobile load, or lack of a real website) is causing potential local customers or smartphone users to bounce or call competitors.
-3. Zero-Risk Offer: Offer to put together a free visual 3-page mockup or homepage design concept for them at ZERO cost or commitment before they ever pay a dime.
-4. Call to Action (CTA): End with a simple, low-friction question asking if they'd be open to seeing a quick preview or 2-minute video mockup.
-
-CRITICAL RULES — you MUST follow these:
-1. LANGUAGE DETECTION & TRANSLATION: Analyze the Location ({state.get('address')}) and Business name. Determine the primary local language spoken by business owners in this city/country (e.g., Spanish for Spain/Mexico, German for Germany/Austria, French for France/Quebec, English for US/UK/Australia). You MUST write the ENTIRE subject line and email body natively in that local language!
-2. Do NOT claim to have helped other businesses or fabricate client names/portfolio links. Be honest and straightforward.
-3. Do NOT use robotic clichés like "I hope this email finds you well" or "In today's fast-paced digital landscape".
-4. Keep the email copy under 135 words. Short, punchy, and conversational.
-5. No em dashes, no exclamation-point enthusiasm.
-6. Do NOT include a sign-off or signature at the end of the email (we will append our signature programmatically). Just end with your call to action question.
-
-Output in EXACTLY this format, nothing else:
-LANGUAGE: <Primary local language name, e.g. English, Spanish, German>
-SUBJECT: <Subject line in local language>
-BODY:
-<Email body in local language>"""
-
-    resp = _client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-    text = (resp.text or "").strip()
-
-    language = "English"
-    subject = "Quick question about your online presence"
-    body = text
-
-    if "LANGUAGE:" in text and "SUBJECT:" in text and "BODY:" in text:
-        try:
-            lang_part, rest = text.split("SUBJECT:", 1)
-            language = lang_part.replace("LANGUAGE:", "").strip()
-            subject_part, body_part = rest.split("BODY:", 1)
-            subject = subject_part.strip()
-            body = body_part.strip()
-        except ValueError:
-            pass
-    elif "SUBJECT:" in text and "BODY:" in text:
-        subject_part, body_part = text.split("BODY:", 1)
-        subject = subject_part.replace("SUBJECT:", "").strip()
-        body = body_part.strip()
-
-    body = _append_signature(body)
+    subject = pick_subject(subjects, state.get("name") or "")
+    body = _append_signature(clean_body(body))
     return {"pitch_subject": subject, "pitch_body": body, "email_language": language}

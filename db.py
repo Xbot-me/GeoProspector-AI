@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS businesses (
     open_count INTEGER DEFAULT 0,
     sent_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
+    pagespeed_score INTEGER,
+    pagespeed_lcp TEXT,
+    followup_sent_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -98,6 +101,9 @@ _MIGRATION_COLUMNS = [
     ("open_count", "INTEGER"),
     ("sent_at", "TIMESTAMP WITH TIME ZONE"),
     ("error_message", "TEXT"),
+    ("pagespeed_score", "INTEGER"),
+    ("pagespeed_lcp", "TEXT"),
+    ("followup_sent_at", "TIMESTAMP WITH TIME ZONE"),
 ]
 
 
@@ -201,6 +207,7 @@ _ALL_FIELDS = [
     "contact_sources", "lead_score", "score_breakdown", "analysis",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
+    "pagespeed_score", "pagespeed_lcp",
 ]
 
 
@@ -282,11 +289,15 @@ def get_run_stats() -> dict:
 
 
 def get_daily_sent_count() -> int:
-    """Return number of emails dispatched in the last 24 hours."""
+    """Return number of emails dispatched in the last 24 hours (first
+    emails and follow-ups both count toward the daily cap)."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM businesses "
-            "WHERE send_status = 'sent' AND sent_at >= NOW() - INTERVAL '24 hours'"
+            "SELECT "
+            "  COUNT(*) FILTER (WHERE send_status = 'sent' "
+            "    AND sent_at >= NOW() - INTERVAL '24 hours') "
+            "+ COUNT(*) FILTER (WHERE followup_sent_at >= NOW() - INTERVAL '24 hours') "
+            "AS cnt FROM businesses"
         ).fetchone()
         return row["cnt"] if row else 0
 
@@ -318,16 +329,77 @@ def record_email_sent(place_id: str, status: str = "sent", error: str = None) ->
         )
 
 
+def record_followup_sent(place_id: str, status: str = "sent", error: str = None) -> None:
+    """Record a follow-up dispatch without touching the first email's
+    send_status / sent_at."""
+    with get_conn() as conn:
+        if status == "sent":
+            conn.execute(
+                "UPDATE businesses SET followup_sent_at = CURRENT_TIMESTAMP, "
+                "updated_at = CURRENT_TIMESTAMP WHERE place_id = %s",
+                (place_id,),
+            )
+        else:
+            conn.execute(
+                "UPDATE businesses SET error_message = %s, "
+                "updated_at = CURRENT_TIMESTAMP WHERE place_id = %s",
+                (f"followup {status}: {error}", place_id),
+            )
+
+
+def get_followup_candidates(after_days: int, limit: int = 5) -> list[dict]:
+    """Leads whose first email went out at least `after_days` ago, with no
+    follow-up yet. Anyone marked replied/rejected, suppressed or opted out is
+    excluded, and so is anyone whose first send was not a real send."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM businesses "
+            "WHERE send_status = 'sent' "
+            "AND followup_sent_at IS NULL "
+            "AND sent_at <= NOW() - make_interval(days => %s) "
+            "AND approval_status NOT IN ('replied', 'rejected', 'unsubscribed') "
+            "AND email IS NOT NULL AND email != '' "
+            # a follow-up that already failed is not retried automatically
+            "AND (error_message IS NULL OR error_message NOT LIKE 'followup %%') "
+            "AND LOWER(email) NOT IN (SELECT LOWER(email) FROM suppression_list) "
+            "ORDER BY sent_at ASC LIMIT %s",
+            (after_days, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_call_list(min_score: int = 0, limit: int = 50) -> list[dict]:
+    """Prospects worth phoning: they have a phone number, a real gap in their
+    web presence, and have not said no, replied, or been marked contacted."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM businesses "
+            "WHERE phone IS NOT NULL AND phone != '' "
+            "AND website_quality IN ('none', 'social_only', 'dead', 'outdated') "
+            "AND COALESCE(approval_status, 'pending') NOT IN ('rejected', 'replied', 'unsubscribed') "
+            "AND COALESCE(send_status, 'not_sent') NOT IN ('unsubscribed') "
+            "AND COALESCE(lead_score, 0) >= %s "
+            "ORDER BY lead_score DESC NULLS LAST, review_count DESC NULLS LAST "
+            "LIMIT %s",
+            (min_score, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
     """Fetch leads ready to be emailed (have email, not yet sent, score qualified).
     Excludes unsubscribed, bounced, and complained leads.
+    With REQUIRE_APPROVAL on (default), only leads a human approved in the
+    dashboard are returned.
     Prioritizes verified emails over unverified ones."""
-    from config import MIN_LEAD_SCORE
+    from config import MIN_LEAD_SCORE, REQUIRE_APPROVAL
+    approval_clause = "AND approval_status = 'approved' " if REQUIRE_APPROVAL else ""
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM businesses "
             "WHERE email IS NOT NULL AND email != '' "
             "AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
+            + approval_clause +
             "AND (lead_score IS NULL OR lead_score >= %s) "
             "AND pitch_subject IS NOT NULL AND pitch_subject != '' "
             "AND LOWER(email) NOT IN (SELECT LOWER(email) FROM suppression_list) "
@@ -373,13 +445,18 @@ def retry_failed_emails() -> int:
         cursor = conn.execute(
             "UPDATE businesses "
             "SET send_status = 'pending_auto_send', error_message = NULL "
-            "WHERE send_status = 'failed' AND email IS NOT NULL AND email != ''"
+            "WHERE send_status IN ('failed', 'simulated') AND email IS NOT NULL AND email != ''"
         )
         return cursor.rowcount
 
 
-def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
-    """Check if a business has already been processed or contacted (100% solid deduplication)."""
+def is_business_already_processed(place_id: str, name: str = "", email: str = "",
+                                  exclude_place_id: str = "") -> bool:
+    """Check if a business has already been processed or contacted (100% solid deduplication).
+
+    exclude_place_id: ignore this lead's own row in the email check. The
+    pipeline saves a lead (with its email) before the dedupe check runs, so
+    without this every lead matched itself and was marked a duplicate."""
     with get_conn() as conn:
         # 1. Check by place_id
         if place_id:
@@ -404,8 +481,9 @@ def is_business_already_processed(place_id: str, name: str = "", email: str = ""
         # 3. Check by email if present
         if email and "@" in email:
             row = conn.execute(
-                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) AND send_status IN ('sent', 'pending_auto_send', 'queued')",
-                (email.strip(),),
+                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) "
+                "AND place_id != %s AND send_status IN ('sent', 'pending_auto_send', 'queued')",
+                (email.strip(), exclude_place_id),
             ).fetchone()
             if row:
                 return True

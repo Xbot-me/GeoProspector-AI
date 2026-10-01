@@ -1,0 +1,42 @@
+version: '3.8'
+
+# For running on your own PC (no reverse proxy, no external Docker network).
+# The VPS deployment keeps using docker-compose.yml.
+#
+#   docker compose -f docker-compose.local.yml up -d --build
+#   open http://127.0.0.1:8000
+#
+# Only want the database and to run the app with `python app.py`? Use:
+#   docker compose -f docker-compose.local.yml up -d db
+#   (and set DATABASE_URL=postgresql://appuser:secretpassword@localhost:5432/geoprospector)
+
+services:
+  web:
+    build: .
+    container_name: maps-outreach-agent-local
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://appuser:${POSTGRES_PASSWORD:-secretpassword}@db:5432/geoprospector
+    depends_on:
+      - db
+    volumes:
+      - maps_outreach_data:/app/data
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  db:
+    image: postgres:16-alpine
+    container_name: maps-outreach-db-local
+    environment:
+      POSTGRES_DB: geoprospector
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secretpassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+
+volumes:
+  maps_outreach_data:
+  postgres_data:
