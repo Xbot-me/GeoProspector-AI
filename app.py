@@ -528,7 +528,7 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
         "location": location,
         "message": f"🎯 LAUNCHED CAMPAIGN: {query.upper()} in {location.upper()}"
     })
-    _broadcast(run_id, {"type": "status", "message": f"Searching Google Maps for {query} in {location}..."})
+    _broadcast(run_id, {"type": "status", "message": f"Discovering leads for {query} in {location} across directory sources..."})
 
     try:
         businesses = search_businesses(
@@ -572,6 +572,7 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
                     "website": b.get("website"),
                     "rating": b.get("rating"),
                     "review_count": b.get("review_count"),
+                    "contact_sources": b.get("contact_sources"),
                     "approval_status": "pending",
                     "send_status": "not_sent",
                 })

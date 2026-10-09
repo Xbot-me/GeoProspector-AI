@@ -105,6 +105,12 @@ def score_lead(state: BusinessState) -> dict:
         score += 10
         breakdown.append(f"High-value category ({category}): +10")
 
+    # --- Cross-verification bonus ---
+    contact_sources = state.get("contact_sources") or ""
+    if "Cross-verified" in contact_sources:
+        score += 5
+        breakdown.append("Cross-verified across multiple sources: +5")
+
     # Cap at 100
     score = min(score, 100)
 
