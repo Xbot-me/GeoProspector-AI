@@ -34,5 +34,5 @@ EXPOSE 8000
 
 ENV DATABASE_URL=postgresql://appuser:secretpassword@db:5432/geoprospector
 
-# Run the FastAPI app with Uvicorn
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the FastAPI app with Uvicorn (supports Render's dynamic $PORT)
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
