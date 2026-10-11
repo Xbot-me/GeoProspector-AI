@@ -39,7 +39,7 @@ Checkpointer: Postgres via `get_checkpointer_cm()`.
 - Leads/runs: `GET /api/leads[/{place_id}]`, `POST /api/leads/{place_id}/status`, `GET /api/runs`, `/api/runs/{id}/leads`, `/api/runs/{id}/csv`.
 - Search: `POST /api/search` (starts pipeline thread), `WS /ws/{run_id}` (progress), `GET /api/suggest-target` (Gemini niche).
 - Email ops: `GET /api/email-logs`, `POST /api/email-logs/clear|retry-failed`, `GET /api/scheduler/status`, `POST /api/campaign/run_daily`.
-- Compliance/tracking: `GET /api/track/open/{place_id}.png`, `GET /api/unsubscribe/{place_id}`, `POST /api/webhooks/resend`, `GET /api/suppression`, `POST /api/suppression/add`.
+- Compliance/tracking: `GET /api/track/open/{place_id}.png`, `GET /api/unsubscribe/{place_id}` (confirm page) + `POST` (unsubscribe, RFC 8058 one-click), `POST /api/webhooks/resend`, `GET /api/suppression`, `POST /api/suppression/add`.
 
 ## Frontend (`static/`, vanilla JS)
 `index.html` + `app.js` (search dashboard, WebSocket), `history.html` + `history.js` (runs/leads/email log), `login.html`, `style.css`.
