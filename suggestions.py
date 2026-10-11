@@ -12,12 +12,20 @@ import random
 from collections import deque
 
 import llm
-from auto_campaign import HOME_SERVICE_NICHES, TARGET_CITIES
+from auto_campaign import NICHE_REFERENCE, TARGET_LOCATIONS, format_location
 from db import get_conn
 
 logger = logging.getLogger(__name__)
 
 MIN_NICHES, MAX_NICHES = 3, 5
+
+# From catalog/target_catalog.json: niches (best hit rate first) and locations.
+_HIT_ORDER = {"high": 0, "medium-high": 1, "medium": 2}
+CATALOG_NICHES = [
+    n["search_term"].title()
+    for n in sorted(NICHE_REFERENCE, key=lambda n: _HIT_ORDER.get(str(n.get("hit_rate", "")).lower(), 3))
+]
+CATALOG_LOCATIONS = [format_location(t) for t in TARGET_LOCATIONS]
 
 # (location_lower, frozenset(niches_lower)) of recent suggestions, in-process only.
 _recent: deque = deque(maxlen=40)
@@ -59,6 +67,13 @@ def _fresh_niches(niches: list[str], location: str, executed: set) -> list[str]:
     return out[:MAX_NICHES]
 
 
+def is_searchable(niche: str) -> bool:
+    """True when the area search maps every word of the niche to known business categories.
+    Suggested niches like 'Architectural Millwork Specialists' found nothing in production."""
+    from nodes.places_overture import NicheMatcher
+    return NicheMatcher(niche).curated
+
+
 def _is_recent(location: str, niches: list[str]) -> bool:
     return (_norm(location), frozenset(_norm(n) for n in niches)) in _recent
 
@@ -75,6 +90,8 @@ Suggest ONE city and {MIN_NICHES}-{MAX_NICHES} related local business niches to 
 Good niches: high customer value ($2k+ jobs), owner-operated, often weak or outdated websites
 (trades, home services, clinics, specialist contractors). Related means they share customers
 or suppliers (e.g. Roofers, Gutter Installers, Siding Contractors).
+Use plain, common trade names exactly as a map would list them ("Roofers", "Plumbers", "Med Spas",
+"Carpenters", "Pool Builders"). No adjectives like Custom, Luxury, High-End or Architectural.
 Good cities: growing mid-sized cities in the US, Canada, UK, Ireland, Australia, New Zealand
 or Western Europe. Vary country and region; do not default to the largest cities.
 
@@ -92,7 +109,8 @@ Return JSON: {{"location": "City, Region, Country", "niches": ["Niche One", "Nic
             logger.warning(f"Gemini suggestion failed: {e}")
             return None
         location = (data.get("location") or "").strip() if isinstance(data, dict) else ""
-        niches = _fresh_niches([n for n in data.get("niches", []) if isinstance(n, str)], location, executed) if location else []
+        proposed = [n for n in data.get("niches", []) if isinstance(n, str) and is_searchable(n)]
+        niches = _fresh_niches(proposed, location, executed) if location else []
         if location and len(niches) >= 2 and not _is_recent(location, niches):
             return {"location": location, "niches": niches, "source": "gemini"}
     return None
@@ -101,13 +119,12 @@ Return JSON: {{"location": "City, Region, Country", "niches": ["Niche One", "Nic
 def _from_catalog(executed: set) -> dict:
     """City with unsearched niches, chosen at random among the best, skipping recent suggestions."""
     options = []
-    for city, region in TARGET_CITIES:
-        location = f"{city}, {region}"
-        fresh = _fresh_niches(HOME_SERVICE_NICHES, location, executed)
+    for location in CATALOG_LOCATIONS:
+        fresh = _fresh_niches(CATALOG_NICHES, location, executed)
         if len(fresh) >= 2:
             options.append((location, fresh))
     if not options:  # everything searched: allow repeats rather than return nothing
-        options = [(f"{c}, {r}", list(HOME_SERVICE_NICHES)) for c, r in TARGET_CITIES]
+        options = [(loc, CATALOG_NICHES[:MAX_NICHES]) for loc in CATALOG_LOCATIONS]
 
     random.shuffle(options)
     options.sort(key=lambda o: len(o[1]), reverse=True)

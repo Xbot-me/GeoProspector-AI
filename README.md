@@ -31,7 +31,7 @@ Whether you run a web design agency, a marketing firm, or a SaaS company, GeoPro
 
 ## 📦 Setup & Installation
 
-GeoProspector AI is built for easy local usage or production deployment to a VPS.
+GeoProspector AI runs locally, on Render (production: Docker web service + Render Postgres, auto-deployed from GitHub), or self-hosted with Docker Compose.
 
 ### Option 1: Run Locally
 
@@ -54,7 +54,7 @@ python app.py
 ```
 Open `http://localhost:8000` in your browser to access the dashboard.
 
-### Option 2: Deploy to VPS (Docker Compose + Caddy)
+### Option 2: Self-host with Docker Compose + Caddy
 
 The repository includes a production-ready `Dockerfile` running as a non-root user for security, and a `docker-compose.yml` configured to run behind a reverse proxy without exposing host ports.
 

@@ -1,82 +1,187 @@
 """
-Daily Auto-Pilot Campaign Target Catalog & Rotation Engine.
-Curated list of high-value local service niches and booming mid-sized cities
-across the US and globally.
+Worldwide Location & Niche Catalog Rotation Engine.
+Loads curated targets & niche references from catalog/target_catalog.json.
+Provides cluster-aware rotation and niche suggestions.
 """
-from datetime import datetime, timedelta
+import json
+import logging
+import re
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from db import get_conn
 
-HOME_SERVICE_NICHES = [
-    "HVAC Contractors",
-    "Plumbers",
-    "Electricians",
-    "Roofers",
-    "Landscaping Services",
-    "Cleaning Companies",
-    "Solar Installers",
-    "Tree Removal Services",
-    "Concrete Contractors",
-    "Garage Door Repair",
-    "Kitchen & Bath Remodelers",
-    "Pest Control Services",
-    "Commercial Construction",
-]
+logger = logging.getLogger(__name__)
 
-TARGET_CITIES = [
-    # Tier 1: Premier Opportunities (High Revenue, Low Tech, Low Agency Competition)
-    ("Bend", "Oregon, USA"),
-    ("Greenville", "South Carolina, USA"),
-    ("Kelowna", "British Columbia, Canada"),
-    ("Tyler", "Texas, USA"),
-    ("Aberdeen", "Scotland, United Kingdom"),
-    ("Fargo", "North Dakota, USA"),
-    ("Boise", "Idaho, USA"),
-    ("Lancaster", "Pennsylvania, USA"),
-    ("Linz", "Austria"),
-    ("Pensacola", "Florida, USA"),
-    ("Sudbury", "Ontario, Canada"),
-    ("Tampere", "Finland"),
-    ("Greenville", "North Carolina, USA"),
-    ("Santander", "Cantabria, Spain"),
-    ("Appleton", "Wisconsin, USA"),
+# Load worldwide target catalog from JSON data file (checking catalog/ then data/ then root)
+_CATALOG_PATH = Path(__file__).parent / "catalog" / "target_catalog.json"
+if not _CATALOG_PATH.exists():
+    _CATALOG_PATH = Path(__file__).parent / "data" / "target_catalog.json"
+if not _CATALOG_PATH.exists():
+    _CATALOG_PATH = Path(__file__).parent / "target_catalog.json"
 
-    # Tier 2: High-Growth Regional Corridors
-    ("Asheville", "North Carolina, USA"),
-    ("Wilmington", "North Carolina, USA"),
-    ("Chattanooga", "Tennessee, USA"),
-    ("Knoxville", "Tennessee, USA"),
-    ("Guelph", "Ontario, Canada"),
-    ("Waco", "Texas, USA"),
-    ("Stavanger", "Norway"),
-    ("Erie", "Pennsylvania, USA"),
-    ("Brest", "France"),
-    ("Dayton", "Ohio, USA"),
-    ("Odense", "Denmark"),
-    ("Grand Rapids", "Michigan, USA"),
-    ("Augsburg", "Germany"),
-    ("Lafayette", "Louisiana, USA"),
-    ("Swansea", "Wales, United Kingdom"),
-    ("Kalamazoo", "Michigan, USA"),
-    ("Gainesville", "Florida, USA"),
-    ("Turku", "Finland"),
-    ("Monroe", "Louisiana, USA"),
-    ("Coimbra", "Portugal"),
+with open(_CATALOG_PATH, "r", encoding="utf-8") as f:
+    _CATALOG = json.load(f)
 
-    # Tier 3: Global & Niche Trade Hubs
-    ("Manchester", "United Kingdom"),
-    ("Bristol", "United Kingdom"),
-    ("Sydney", "Australia"),
-    ("Melbourne", "Australia"),
-    ("Vancouver", "Canada"),
-    ("Calgary", "Canada"),
-    ("Dublin", "Ireland"),
-    ("Madrid", "Spain"),
-    ("Berlin", "Germany"),
-    ("Paris", "France"),
-    ("Zurich", "Switzerland"),
-]
+TARGET_LOCATIONS = _CATALOG["targets"]
+NICHE_REFERENCE = _CATALOG["niche_reference"]
+
+# Hit-rate weights for niche prioritization
+HIT_RATE_WEIGHTS = {
+    "high": 3,
+    "medium-high": 2,
+    "medium": 1,
+}
+
+# Map search terms to hit-rate weight
+NICHE_WEIGHT_MAP = {
+    n["search_term"].lower().strip(): HIT_RATE_WEIGHTS.get(n.get("hit_rate", "").lower().strip(), 1)
+    for n in NICHE_REFERENCE
+}
+
+
+def format_location(target: dict) -> str:
+    """Format target location into a standard string for Places API search."""
+    name = target.get("name", "")
+    region = target.get("region")
+    country = target.get("country", "")
+    if region:
+        return f"{name}, {region}, {country}"
+    return f"{name}, {country}"
+
+
+def _parse_population(pop_str: str | None) -> int:
+    """Extract numeric population count for sorting towns within clusters."""
+    if not pop_str:
+        return 0
+    clean = re.sub(r"[^\d]", "", pop_str.split("(")[0])
+    try:
+        return int(clean)
+    except ValueError:
+        return 0
+
+
+def get_all_target_combinations() -> list[dict]:
+    """Return all target combinations (location + suggested niches) from the catalog."""
+    combos = []
+    for t in TARGET_LOCATIONS:
+        loc_str = format_location(t)
+        niches = t.get("suggested_niches") or ["local businesses"]
+        for niche in niches:
+            combos.append({
+                "query": niche,
+                "location": loc_str,
+                "display_name": f"{niche} in {loc_str}",
+                "target": t,
+            })
+    return combos
+
+
+def get_next_campaign_target() -> dict:
+    """
+    Select the next campaign target using cluster-aware rotation:
+    1. Group locations by cluster_group.
+    2. Sort towns within each cluster by population descending.
+    3. Pick the next cluster with NO runs yet (returning its largest town & best weighted niche).
+    4. If all clusters have runs, check if any cluster's first run had low yield (result_count < 15) and pick 2nd town.
+    5. Rotate through remaining un-executed (niche, location) combinations.
+    """
+    executed_runs = []
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("SELECT query, location, result_count FROM search_runs").fetchall()
+            executed_runs = [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"Failed to fetch past search runs: {e}")
+
+    executed_keys = {
+        (r["query"].lower().strip(), r["location"].lower().strip())
+        for r in executed_runs if r.get("query") and r.get("location")
+    }
+
+    executed_locations = {
+        r["location"].lower().strip() for r in executed_runs if r.get("location")
+    }
+
+    # Group locations by cluster_group
+    clusters = {}
+    for t in TARGET_LOCATIONS:
+        cg = t.get("cluster_group") or f"Singleton-{t['name']}"
+        if cg not in clusters:
+            clusters[cg] = []
+        clusters[cg].append(t)
+
+    # Sort towns in each cluster by population descending
+    for cg in clusters:
+        clusters[cg].sort(key=lambda t: _parse_population(t.get("population")), reverse=True)
+
+    # 1. Look for an un-run cluster (no town in cluster has been searched yet)
+    for cg, towns in clusters.items():
+        cluster_run_locations = [
+            format_location(t).lower().strip() for t in towns
+            if format_location(t).lower().strip() in executed_locations
+        ]
+        
+        if not cluster_run_locations:
+            # Entire cluster has no runs yet! Pick largest town in cluster.
+            top_town = towns[0]
+            loc_str = format_location(top_town)
+            best_niche = _select_best_niche(top_town, executed_keys, loc_str)
+            return {
+                "query": best_niche,
+                "location": loc_str,
+                "display_name": f"{best_niche} in {loc_str}",
+                "target": top_town,
+            }
+
+    # 2. Check if any cluster's first run yielded low results (result_count < 15) -> pick 2nd town if available
+    for cg, towns in clusters.items():
+        if len(towns) > 1:
+            first_loc = format_location(towns[0]).lower().strip()
+            first_runs = [r for r in executed_runs if r.get("location", "").lower().strip() == first_loc]
+            first_yield = max([r.get("result_count") or 0 for r in first_runs], default=0)
+            
+            second_loc = format_location(towns[1]).lower().strip()
+            if first_yield < 15 and second_loc not in executed_locations:
+                second_town = towns[1]
+                loc_str = format_location(second_town)
+                best_niche = _select_best_niche(second_town, executed_keys, loc_str)
+                return {
+                    "query": best_niche,
+                    "location": loc_str,
+                    "display_name": f"{best_niche} in {loc_str}",
+                    "target": second_town,
+                }
+
+    # 3. All clusters run -> iterate through catalog to find any un-executed (niche, location) combo
+    all_combos = get_all_target_combinations()
+    for combo in all_combos:
+        key = (combo["query"].lower().strip(), combo["location"].lower().strip())
+        if key not in executed_keys:
+            return combo
+
+    # 4. Fallback if entire catalog is 100% exhausted
+    return all_combos[0]
+
+
+def _select_best_niche(town: dict, executed_keys: set, loc_str: str) -> str:
+    """Select the highest-weighted niche for a town that hasn't been executed yet."""
+    niches = town.get("suggested_niches") or ["local businesses"]
+    
+    # Sort niches by weight descending (High > Medium-High > Medium)
+    sorted_niches = sorted(
+        niches,
+        key=lambda n: NICHE_WEIGHT_MAP.get(n.lower().strip(), 1),
+        reverse=True
+    )
+    
+    for niche in sorted_niches:
+        key = (niche.lower().strip(), loc_str.lower().strip())
+        if key not in executed_keys:
+            return niche
+            
+    return sorted_niches[0]
+
 
 # ---------------------------------------------------------------------------
 # Timezone mapping for every city in TARGET_CITIES
@@ -225,118 +330,3 @@ def get_lead_timezone(address: str, stored_tz: str | None = None) -> str:
             if country_tz is None or city_tz.split("/")[0] == country_tz.split("/")[0]:
                 return city_tz
     return country_tz or _DEFAULT_TZ
-
-
-def is_good_send_time(timezone_str: str) -> bool:
-    """Return ``True`` when the current local time in *timezone_str* falls
-    inside a preferred outreach window.
-
-    Windows (weekdays only, Mon-Fri):
-    * Morning:  07:00 – 09:00
-    * Evening:  17:00 – 19:30
-    """
-    now = datetime.now(ZoneInfo(timezone_str))
-    if now.weekday() >= 5:          # Saturday=5, Sunday=6
-        return False
-    t = now.time()
-    morning = t.hour >= 7 and (t.hour < 9)
-    evening = (t.hour == 17) or (t.hour == 18) or (t.hour == 19 and t.minute < 30)
-    return morning or evening
-
-
-def seconds_until_next_window(timezone_str: str) -> int:
-    """Return the number of seconds until the next valid send window.
-
-    * If currently inside a window → ``0``
-    * Between the morning and evening windows → seconds until 17:00 today
-    * After the evening window → seconds until 07:00 next day
-    * Weekend → seconds until Monday 07:00
-    """
-    tz = ZoneInfo(timezone_str)
-    now = datetime.now(tz)
-
-    if is_good_send_time(timezone_str):
-        return 0
-
-    def _seconds_to(target: datetime) -> int:
-        return max(0, int((target - now).total_seconds()))
-
-    # Weekday handling (Mon-Fri)
-    if now.weekday() < 5:
-        morning_start = now.replace(hour=7, minute=0, second=0, microsecond=0)
-        evening_start = now.replace(hour=17, minute=0, second=0, microsecond=0)
-
-        if now < morning_start:
-            return _seconds_to(morning_start)
-        if now < evening_start:
-            return _seconds_to(evening_start)
-        # After evening window → next day 07:00
-        next_morning = (now + timedelta(days=1)).replace(
-            hour=7, minute=0, second=0, microsecond=0,
-        )
-        # If next day is a weekend, advance to Monday
-        while next_morning.weekday() >= 5:
-            next_morning += timedelta(days=1)
-        return _seconds_to(next_morning)
-
-    # Weekend → advance to Monday 07:00
-    days_ahead = 7 - now.weekday()          # Mon=0, so Sat→2, Sun→1
-    next_monday = (now + timedelta(days=days_ahead)).replace(
-        hour=7, minute=0, second=0, microsecond=0,
-    )
-    return _seconds_to(next_monday)
-
-
-def get_all_target_combinations() -> list[dict]:
-    """
-    Return diverse, interleaved (niche, city) combinations so sequential runs
-    automatically rotate BOTH category and geography on every run.
-    """
-    combos = []
-    num_niches = len(HOME_SERVICE_NICHES)
-    num_cities = len(TARGET_CITIES)
-    # Generate interleaved combinations across niches and cities
-    max_combos = num_niches * num_cities
-
-    for i in range(max_combos):
-        # Pick niche and city with relative offset so we step through both lists simultaneously
-        niche = HOME_SERVICE_NICHES[i % num_niches]
-        # Shift city index by niche multiplier to ensure full coverage without clustering
-        city_idx = (i + (i // num_niches)) % num_cities
-        city_name, state_country = TARGET_CITIES[city_idx]
-        combos.append({
-            "query": niche,
-            "location": f"{city_name}, {state_country}",
-            "display_name": f"{niche} in {city_name}, {state_country}",
-        })
-    return combos
-
-
-def get_next_campaign_target() -> dict:
-    """
-    Select the next target combination that hasn't been searched yet.
-    Guarantees no duplicate searches and diverse location/niche rotation.
-    """
-    try:
-        with get_conn() as conn:
-            rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
-            executed = {(r["query"].lower().strip(), r["location"].lower().strip()) for r in rows}
-    except Exception:
-        executed = set()
-
-    combos = get_all_target_combinations()
-    for target in combos:
-        key = (target["query"].lower().strip(), target["location"].lower().strip())
-        if key not in executed:
-            return target
-
-    # Fallback if all curated combos have been executed: shuffle and find unexecuted
-    import random
-    shuffled = list(combos)
-    random.shuffle(shuffled)
-    for target in shuffled:
-        key = (target["query"].lower().strip(), target["location"].lower().strip())
-        if key not in executed:
-            return target
-
-    return combos[0]

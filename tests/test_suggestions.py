@@ -14,7 +14,7 @@ def executed_for(pairs):
 
 
 def test_catalog_bundle_never_repeats_searched_niches(monkeypatch):
-    done = [(n, "Bend, Oregon, USA") for n in sg.HOME_SERVICE_NICHES[:-1]]
+    done = [(n, sg.CATALOG_LOCATIONS[0]) for n in sg.CATALOG_NICHES[:-1]]
     monkeypatch.setattr(sg, "executed_targets", executed_for(done))
     for _ in range(30):
         s = sg.suggest_bundle()
@@ -38,6 +38,16 @@ def test_gemini_answer_filtered_against_history(monkeypatch):
         "location": "Boise, Idaho, USA", "niches": ["Roofers", "Gutter Installers", "Siding Contractors"]})
     s = sg.suggest_bundle()
     assert s["source"] == "gemini" and s["niches"] == ["Gutter Installers", "Siding Contractors"]
+
+
+def test_gemini_niches_the_search_cant_find_are_dropped(monkeypatch):
+    monkeypatch.setattr(sg, "executed_targets", executed_for([]))
+    monkeypatch.setattr(sg.llm, "available", lambda: True)
+    monkeypatch.setattr(sg.llm, "generate_json", lambda prompt, temperature=None: {
+        "location": "Galway, Ireland",
+        "niches": ["Roofers", "Scaffolding Hire and Erection", "Solar Panel Installers"]})
+    s = sg.suggest_bundle()
+    assert s["niches"] == ["Roofers", "Solar Panel Installers"]
 
 
 def test_gemini_repeat_or_failure_falls_back_to_catalog(monkeypatch):

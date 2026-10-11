@@ -65,6 +65,8 @@ NOMINATIM_USER_AGENT = os.getenv("NOMINATIM_USER_AGENT") or (
 COMPANIES_HOUSE_API_KEY = os.getenv("COMPANIES_HOUSE_API_KEY", "")  # UK company officers
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://appuser:secretpassword@localhost:5432/geoprospector")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # Email Delivery & Auto-Pilot Outreach Settings
 EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "resend").lower()
@@ -75,9 +77,6 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = _int("SMTP_PORT", 587)
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
-
-AUTO_SEND_EMAILS = _bool("AUTO_SEND_EMAILS", True)
-MAX_DAILY_EMAILS = _int("MAX_DAILY_EMAILS", 20)
 
 # CAN-SPAM compliance — legally required in every commercial email
 SENDER_PHYSICAL_ADDRESS = os.getenv("SENDER_PHYSICAL_ADDRESS", "") or "Dhaka, Bangladesh"

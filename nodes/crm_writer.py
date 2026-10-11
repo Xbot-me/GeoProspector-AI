@@ -46,6 +46,7 @@ def save_to_crm(state: BusinessState) -> dict:
         "lead_score": state.get("lead_score"),
         "score_breakdown": state.get("score_breakdown"),
         "analysis": state.get("analysis"),
+        "mockup_prompt": state.get("mockup_prompt"),
         "pitch_subject": state.get("pitch_subject"),
         "pitch_body": state.get("pitch_body"),
         "email_language": state.get("email_language", "English"),

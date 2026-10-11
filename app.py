@@ -1,9 +1,11 @@
 """
 Web dashboard entry point.
 
-Serves a real-time dashboard at http://localhost:8000 that replaces the
-CLI for running the outreach pipeline. The existing CLI (main.py) still
-works — this is a parallel entry point.
+Serves the dashboard at http://localhost:8000: search an area for one or more
+niches, enrich every business (website, owner, contacts, reviews), and build a
+manual outreach kit (analysis, mockup prompt, email draft) per lead. Emails are
+sent only when the user explicitly dispatches one lead. The CLI (main.py) is a
+parallel entry point.
 
 Usage:
     python app.py
@@ -13,17 +15,14 @@ import asyncio
 import base64
 import csv
 import io
-import json
 import logging
-import random
 import secrets
-import time
 import uuid
-from urllib.parse import quote
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Thread
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Response
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
@@ -32,23 +31,19 @@ from fastapi.staticfiles import StaticFiles
 from db import (
     get_all_leads, get_all_runs, get_business, get_businesses_for_run,
     init_db, link_business_to_run, save_search_run, update_search_run,
-    upsert_business, record_email_open, get_pending_auto_send_leads,
-    get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
-    unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
-    claim_lead_for_sending, get_processed_place_ids, is_email_already_contacted,
+    upsert_business, record_email_open, record_email_sent,
+    get_email_logs, clear_email_logs, is_business_already_processed,
+    unsubscribe_business, add_to_suppression, get_suppression_list,
+    claim_lead_for_sending, get_processed_place_ids,
 )
-from email_sender import format_html_email, send_email
-from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
+from email_sender import send_email
 from graph import build_graph, get_checkpointer_cm
 from nodes.area_search import SearchError, search_area
 from suggestions import split_niches, suggest_bundle
-from quota import QuotaExceededError
-from config import (
-    MIN_LEAD_SCORE, ADMIN_USERNAME, ADMIN_PASSWORD,
-    AUTO_SEND_EMAILS, MAX_DAILY_EMAILS,
-)
+from config import ADMIN_USERNAME, ADMIN_PASSWORD, PLACES_PROVIDER
 
-
+# Pipeline/search logs (uvicorn only configures its own loggers): visible in Render logs.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── In-memory run tracking ──────────────────────────────────────────────
@@ -61,107 +56,6 @@ _ws_clients: dict[str, list[WebSocket]] = {}
 # Maps session token -> username for modern HTML login page
 _sessions: dict[str, str] = {}
 
-# Background interval email scheduler state
-_scheduler_state = {
-    "is_running": False,
-    "next_send_time": None,
-    "scheduled_count": 0,
-    "interval_minutes": 30,
-    "last_error": None,
-}
-
-
-# Serialises "check cap -> claim lead -> send" between the interval worker and
-# /api/campaign/run_daily inside this process; the DB claim covers other processes.
-_send_lock = Lock()
-
-
-def _send_next_due_lead() -> dict:
-    """Send at most one email to the best pending lead that is inside its send window.
-
-    Returns {"outcome", "message", "wait_seconds"} where outcome is one of
-    "sent", "failed", "disabled", "quota", "empty", "outside_window".
-    """
-    with _send_lock:
-        if not AUTO_SEND_EMAILS:
-            return {"outcome": "disabled", "message": "Auto-send disabled (AUTO_SEND_EMAILS=false)", "wait_seconds": 60}
-
-        sent_today = get_daily_sent_count()
-        if sent_today >= MAX_DAILY_EMAILS:
-            return {"outcome": "quota", "message": f"Daily quota reached ({sent_today}/{MAX_DAILY_EMAILS})", "wait_seconds": 300}
-
-        pending = get_pending_auto_send_leads(limit=200)
-        _scheduler_state["scheduled_count"] = len(pending)
-        if not pending:
-            return {"outcome": "empty", "message": "Queue empty (waiting for leads...)", "wait_seconds": 60}
-
-        # Leads are in priority order; send the first one whose local time is
-        # inside a send window instead of letting one lead block the queue.
-        soonest: tuple[int, str] | None = None
-        for biz in pending:
-            lead_tz = get_lead_timezone(biz.get("address") or "", biz.get("timezone"))
-            if not is_good_send_time(lead_tz):
-                wait = seconds_until_next_window(lead_tz)
-                if soonest is None or wait < soonest[0]:
-                    soonest = (wait, lead_tz)
-                continue
-
-            claimed = claim_lead_for_sending(biz["place_id"])
-            if not claimed:
-                continue  # status changed since we listed it (unsubscribed, sent elsewhere)
-
-            try:
-                success, err = send_email(
-                    place_id=claimed["place_id"],
-                    to_email=claimed["email"],
-                    subject=claimed["pitch_subject"],
-                    body_text=claimed["pitch_body"],
-                    rating=claimed.get("rating"),
-                    review_count=claimed.get("review_count"),
-                    review_source=claimed.get("review_source"),
-                )
-            except Exception as e:
-                success, err = False, f"Unexpected send error: {e}"
-                record_email_sent(claimed["place_id"], status="failed", error=err)
-
-            if success:
-                return {"outcome": "sent", "message": f"Sent to {claimed.get('name')} ({lead_tz})", "wait_seconds": 0}
-            return {"outcome": "failed", "message": err, "wait_seconds": 0}
-
-        wait, tz = soonest if soonest else (3600, "unknown")
-        return {
-            "outcome": "outside_window",
-            "message": f"Waiting for business hours (next: {tz}, ~{wait // 60}m)",
-            "wait_seconds": wait,
-        }
-
-
-def _interval_worker_loop():
-    logger.info("Starting background interval email sender...")
-    _scheduler_state["is_running"] = True
-    while True:
-        try:
-            result = _send_next_due_lead()
-            outcome = result["outcome"]
-
-            if outcome in ("sent", "failed"):
-                if outcome == "failed":
-                    _scheduler_state["last_error"] = result["message"]
-                # Sleep for randomized interval (25 to 35 minutes)
-                delay_mins = random.randint(25, 35)
-                next_time = datetime.now() + timedelta(minutes=delay_mins)
-                _scheduler_state["next_send_time"] = f"{next_time.strftime('%I:%M %p')} (~{delay_mins}m interval)"
-                time.sleep(delay_mins * 60)
-                continue
-
-            _scheduler_state["next_send_time"] = result["message"]
-            # Re-check at least hourly, and never spin faster than once a minute
-            time.sleep(max(60, min(result["wait_seconds"], 3600)))
-        except Exception as e:
-            logger.error(f"Interval worker exception: {e}")
-            _scheduler_state["last_error"] = str(e)
-            time.sleep(60)
-
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -170,8 +64,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    thread = Thread(target=_interval_worker_loop, daemon=True)
-    thread.start()
     yield
 
 
@@ -277,37 +169,10 @@ async def list_email_logs():
     return get_email_logs(limit=100)
 
 
-@app.get("/api/scheduler/status")
-async def get_scheduler_status():
-    sent_today = get_daily_sent_count()
-    pending = get_pending_auto_send_leads(limit=100)
-    _scheduler_state["scheduled_count"] = len(pending)
-    return {
-        "is_running": _scheduler_state["is_running"],
-        "scheduled_count": len(pending),
-        "daily_sent_total": sent_today,
-        "daily_limit": MAX_DAILY_EMAILS,
-        "auto_send_enabled": AUTO_SEND_EMAILS,
-        "next_send_time": _scheduler_state["next_send_time"] or ("Queue empty" if not pending else "Calculating..."),
-        "last_error": _scheduler_state.get("last_error")
-    }
-
-
 @app.post("/api/email-logs/clear")
 async def clear_logs_endpoint():
-    count = clear_email_logs()
-    _scheduler_state["last_error"] = None
-    return {"success": True, "cleared_count": count}
-
-
-@app.post("/api/email-logs/retry-failed")
-async def retry_failed_endpoint():
-    count = retry_failed_emails()
-    _scheduler_state["last_error"] = None
-    # Recalculate scheduled count
-    pending = get_pending_auto_send_leads(limit=100)
-    _scheduler_state["scheduled_count"] = len(pending)
-    return {"success": True, "requeued_count": count, "scheduled_count": len(pending)}
+    """Hide current log rows. Send history is kept so nobody is emailed twice."""
+    return {"success": True, "cleared_count": clear_email_logs()}
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────
@@ -324,12 +189,12 @@ async def list_leads(run_id: str = ""):
 async def get_lead(place_id: str):
     biz = get_business(place_id)
     if not biz:
-        return {"error": "not found"}, 404
+        return Response(status_code=404, content="Lead not found")
     return biz
 
 
 # Fields the public archive may show to visitors who are not logged in.
-# Contact details, owner names and pitches are third-party personal data.
+# Contact details, owner names and drafts are third-party personal data.
 _PUBLIC_LEAD_FIELDS = (
     "place_id", "name", "category", "rating", "review_count",
     "website", "website_quality", "lead_score",
@@ -360,37 +225,38 @@ _CSV_FIELDS = [
     "owner_name", "owner_role", "owner_linkedin", "company_linkedin",
     "phone", "international_phone", "facebook_url", "instagram_url",
     "rating", "review_count", "review_source", "market_context", "category", "niches", "address",
-    "pitch_subject", "pitch_body",
+    "analysis", "mockup_prompt", "pitch_subject", "pitch_body",
 ]
 
 
-@app.get("/api/runs/{run_id}/csv")
-async def export_run_csv(run_id: str):
-    """Export a run's leads to CSV."""
-    leads = get_businesses_for_run(run_id)
-    if not leads:
-        # If run_id is 'all', export everything
-        if run_id == "all":
-            leads = get_all_leads()
-        else:
-            return {"error": "no leads found"}, 404
-
-    # Build CSV in memory
+def _csv_response(leads: list[dict], filename: str) -> StreamingResponse:
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=_CSV_FIELDS, extrasaction='ignore')
     writer.writeheader()
     for lead in leads:
         writer.writerow(lead)
-
-    output.seek(0)
-    
-    filename = "all_leads.csv" if run_id == "all" else f"run_{run_id}.csv"
-    
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+@app.get("/api/runs/{run_id}/csv")
+async def export_run_csv(run_id: str):
+    """Export a run's leads to CSV ('all' exports every lead)."""
+    if run_id == "all":
+        return _csv_response(get_all_leads(), "all_leads.csv")
+    leads = get_businesses_for_run(run_id)
+    if not leads:
+        return Response(status_code=404, content="No leads found for this run")
+    return _csv_response(leads, f"run_{run_id}.csv")
+
+
+@app.get("/api/export")
+async def export_all_csv():
+    """Export every lead (dashboard 'Export CSV' button)."""
+    return _csv_response(get_all_leads(), "all_leads.csv")
 
 
 @app.get("/api/suggest-target")
@@ -404,22 +270,20 @@ def _write_run_csv_to_disk(run_id: str):
     leads = get_businesses_for_run(run_id)
     if not leads:
         return
-        
+
     data_dir = Path("/app/data")
     if not data_dir.exists():
         data_dir = Path("data")
         data_dir.mkdir(exist_ok=True)
-        
+
     filepath = data_dir / f"run_{run_id}.csv"
-    
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS, extrasaction='ignore')
         writer.writeheader()
         for lead in leads:
             writer.writerow(lead)
-    
-    logger.info(f"Auto-saved CSV to {filepath}")
 
+    logger.info(f"Auto-saved CSV to {filepath}")
 
 
 def _parse_niches(payload: dict) -> list[str]:
@@ -434,33 +298,16 @@ def _parse_niches(payload: dict) -> list[str]:
     return list(unique.values())[:10]
 
 
-def _start_run(niches: list[str], location: str, radius: int, ip_address: str) -> str:
-    run_id = uuid.uuid4().hex[:12]
-    save_search_run(run_id, ", ".join(niches), location, radius, 0, ip_address=ip_address)
-    _runs[run_id] = {
-        "status": "starting",
-        "events": [],
-        "stats": {
-            "found": 0, "good_website": 0, "low_score": 0,
-            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
-            "owners_found": 0, "places_calls": 0,
-        },
-    }
-    _ws_clients.setdefault(run_id, [])
-    # Run pipeline in background thread (LangGraph + requests are sync)
-    Thread(target=_run_pipeline_thread, args=(run_id, niches, location, radius), daemon=True).start()
-    return run_id
-
-
 @app.post("/api/search")
 async def start_search(payload: dict, request: Request):
     """Start a pipeline run in the background.
 
-    Body: {"niches": ["Roofers", "HVAC"], "location": "...", "radius": 5000}
-    ("query": "Roofers, HVAC" is accepted too). Every matching business in the
-    radius is found; there is no per-run result cap."""
+    Body: {"niches": ["Roofers", "HVAC"], "location": "...", "radius": 5000, "area_mode": "auto"}
+    ("query": "Roofers, HVAC" is accepted too). area_mode: "auto" widens the radius until
+    enough businesses are found, "radius" keeps it exact, "city" searches the whole city."""
     niches = _parse_niches(payload)
     location = (payload.get("location") or "").strip()
+    area_mode = payload.get("area_mode") if payload.get("area_mode") in ("auto", "radius", "city") else "auto"
     try:
         radius = max(100, min(int(payload.get("radius") or 5000), 50_000))
     except (TypeError, ValueError):
@@ -475,7 +322,21 @@ async def start_search(payload: dict, request: Request):
     else:
         ip_address = request.client.host if request.client else "unknown"
 
-    return {"run_id": _start_run(niches, location, radius, ip_address)}
+    run_id = uuid.uuid4().hex[:12]
+    save_search_run(run_id, ", ".join(niches), location, radius, 0, ip_address=ip_address)
+    _runs[run_id] = {
+        "status": "starting",
+        "events": [],
+        "stats": {
+            "found": 0, "good_website": 0, "low_score": 0,
+            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
+            "owners_found": 0, "places_calls": 0,
+        },
+    }
+    _ws_clients.setdefault(run_id, [])
+    # Run pipeline in background thread (LangGraph + requests are sync)
+    Thread(target=_run_pipeline_thread, args=(run_id, niches, location, radius, area_mode), daemon=True).start()
+    return {"run_id": run_id}
 
 
 @app.get("/api/track/open/{place_id}.png")
@@ -487,55 +348,92 @@ async def track_email_open(place_id: str):
     return Response(content=pixel, media_type="image/gif")
 
 
-def trigger_auto_pilot_search_run(ip_address: str = "auto_pilot") -> tuple[str, dict]:
-    """Select next campaign target from rotation and launch search run pipeline in background."""
-    target = get_next_campaign_target()
-    run_id = _start_run([target["query"]], target["location"], 15000, ip_address)
-    return run_id, target
+@app.post("/api/leads/{place_id}/build-kit")
+async def build_outreach_kit_endpoint(place_id: str):
+    """Generate an outreach kit (analysis, mockup prompt, email draft) for a single lead."""
+    from nodes.outreach_kit_generator import generate_outreach_kit
+    biz = get_business(place_id)
+    if not biz:
+        return Response(status_code=404, content="Lead not found")
 
-
-@app.post("/api/campaign/run_daily")
-async def run_daily_campaign(request: Request):
-    """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
-    # 1. Send up to one due lead now (same rules as the interval worker:
-    #    cap, send window, atomic claim). The worker handles the rest.
-    send_result = await asyncio.to_thread(_send_next_due_lead)
-    dispatched_count = 1 if send_result["outcome"] == "sent" else 0
-    sent_today = get_daily_sent_count()
-
-    # 2. Select next target from curated US/Global rotation and launch run
-    forwarded = request.headers.get("X-Forwarded-For")
-    ip_address = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-    run_id, target = trigger_auto_pilot_search_run(ip_address=ip_address)
-
-    return {
-        "success": True,
-        "run_id": run_id,
-        "target": target,
-        "dispatched_from_queue": dispatched_count,
-        "send_result": send_result["message"],
-        "daily_sent_total": sent_today,
-    }
+    try:
+        kit = await asyncio.to_thread(generate_outreach_kit, biz)
+        biz.update(kit)
+        upsert_business(biz)
+        return biz
+    except Exception as e:
+        logger.error(f"Error generating outreach kit for {place_id}: {e}")
+        return Response(status_code=500, content=f"Error generating kit: {str(e)}")
 
 
 @app.post("/api/leads/{place_id}/status")
 async def update_lead_status(place_id: str, payload: dict):
-    """Manually mark a lead as contacted or rejected from the UI."""
-    status = payload.get("status")  # 'sent' or 'rejected'
-    
+    """Manually update lead status ('sent', 'not_sent', 'rejected') and/or the draft."""
+    status = payload.get("status")
+    if status not in (None, "sent", "not_sent", "rejected"):
+        return Response(status_code=400, content="status must be sent, not_sent or rejected")
+
     biz = get_business(place_id)
     if not biz:
-        return {"error": "not found"}
+        return Response(status_code=404, content="Lead not found")
 
     if status == "sent":
         biz["send_status"] = "sent"
         biz["approval_status"] = "approved"
+        biz["sent_at"] = datetime.now().isoformat()
+    elif status == "not_sent":
+        biz["send_status"] = "not_sent"
     elif status == "rejected":
         biz["approval_status"] = "rejected"
-    
-    upsert_business(biz)
 
+    if "pitch_body" in payload:
+        biz["pitch_body"] = payload["pitch_body"]
+    if "pitch_subject" in payload:
+        biz["pitch_subject"] = payload["pitch_subject"]
+
+    upsert_business(biz)
     return {"success": True, "send_status": biz["send_status"], "approval_status": biz["approval_status"]}
+
+
+@app.post("/api/leads/{place_id}/send")
+async def send_lead_email(place_id: str, payload: dict | None = None):
+    """Send one lead's draft through the configured provider (Resend/SMTP).
+
+    Only on an explicit click. Refuses drafts that still contain the
+    [MOCKUP_LINK] placeholder, suppressed addresses (checked in send_email),
+    and leads already sent or being sent (atomic claim)."""
+    payload = payload or {}
+    biz = get_business(place_id)
+    if not biz:
+        return Response(status_code=404, content="Lead not found")
+    subject = (payload.get("pitch_subject") or biz.get("pitch_subject") or "").strip()
+    body = (payload.get("pitch_body") or biz.get("pitch_body") or "").strip()
+    if not biz.get("email"):
+        return Response(status_code=400, content="This lead has no email address")
+    if not subject or not body:
+        return Response(status_code=400, content="Subject and body are required")
+    if "[MOCKUP_LINK]" in body or "[MOCKUP_LINK]" in subject:
+        return Response(status_code=400, content="Replace [MOCKUP_LINK] with the real mockup link before sending")
+
+    # Save the edited draft, then claim the lead so a double click can't send twice.
+    if subject != biz.get("pitch_subject") or body != biz.get("pitch_body"):
+        biz.update({"pitch_subject": subject, "pitch_body": body})
+        upsert_business(biz)
+    claimed = claim_lead_for_sending(place_id)
+    if not claimed:
+        return Response(status_code=409, content=f"Not sent: lead status is '{biz.get('send_status')}'")
+
+    try:
+        success, err = await asyncio.to_thread(
+            send_email, place_id=place_id, to_email=claimed["email"], subject=subject, body_text=body,
+        )
+    except Exception as e:
+        success, err = False, f"Unexpected send error: {e}"
+        record_email_sent(place_id, status="failed", error=err)
+    if not success:
+        return Response(status_code=502, content=err or "Send failed")
+    lead = get_business(place_id)
+    return {"success": True, "send_status": lead.get("send_status"), "error_message": lead.get("error_message")}
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────
@@ -575,6 +473,8 @@ def _broadcast(run_id: str, event: dict):
     """Send an event to all WebSocket clients for this run."""
     run = _runs.get(run_id)
     if run:
+        if "events" not in run:
+            run["events"] = []
         run["events"].append(event)
 
     clients = _ws_clients.get(run_id, [])
@@ -593,35 +493,47 @@ def _broadcast(run_id: str, event: dict):
             clients.remove(ws)
 
 
-def market_context(niches: list[str], totals: dict, radius_m: int) -> str | None:
+def market_context(niches: list[str], totals: dict, radius_m: int, area_label: str | None = None) -> str | None:
     """Competitor line for the pitch, from the area search's per-niche counts."""
+    where = f"in the {area_label}" if area_label else f"within {radius_m / 1000:g} km"
     for niche in niches:
         t = totals.get(niche)
         if t and t["total"] >= 3:
-            return (f"{t['with_website']} of {t['total']} {niche.lower()} within "
-                    f"{radius_m / 1000:g} km have a website")
+            # "list": counts come from the places data, not from checking each site
+            noun = niche.lower() if niche.lower().endswith("s") else f"{niche.lower()} businesses"
+            return f"{t['with_website']} of {t['total']} {noun} {where} list a website"
     return None
 
 
-def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: int):
+_AREA_LABELS = {"auto": "radius, widened if needed", "radius": "exact radius", "city": "whole city"}
+
+
+def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: int, area_mode: str = "auto"):
     """Main pipeline execution — runs in a background thread."""
     run = _runs[run_id]
     label = ", ".join(niches)
+    businesses: list[dict] = []
+    area_text = "whole city" if area_mode == "city" else f"{radius / 1000:g} km ({_AREA_LABELS[area_mode]})"
 
-    # Step 1: Find every matching business in the radius
+    # Step 1: Find every matching business in the area
     _broadcast(run_id, {
         "type": "search_start",
         "query": label,
         "location": location,
-        "message": f"🎯 LAUNCHED CAMPAIGN: {label.upper()} in {location.upper()} ({radius / 1000:g} km)"
+        "message": f"🎯 LAUNCHED CAMPAIGN: {label.upper()} in {location.upper()} ({area_text})"
     })
-    _broadcast(run_id, {"type": "status", "message": f"Mapping {location} ({radius / 1000:g} km radius) for {label}..."})
+    _broadcast(run_id, {"type": "status", "message": f"Mapping {location} ({area_text}) for {label}..."})
+    logger.info(f"Run {run_id}: {label!r} in {location!r}, {area_text}")
 
     try:
+        # Google bills per call, so skip details for places already enriched;
+        # Overture is free, so return everything and reuse cached enrichment below.
+        known = get_processed_place_ids() if PLACES_PROVIDER == "google" else None
         businesses, search_stats = search_area(
             niches, location, radius,
-            known_place_ids=get_processed_place_ids(),
+            known_place_ids=known,
             progress=lambda event: _broadcast(run_id, event),
+            area_mode=area_mode,
         )
     except Exception as e:
         if not isinstance(e, (SearchError, RuntimeError)):
@@ -632,33 +544,31 @@ def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: 
         return
 
     run["stats"]["places_calls"] = search_stats["billed_calls"]
+    final_radius = search_stats.get("radius_m", radius)
     summary = (
-        f"Coverage done: {len(businesses)} new businesses, {search_stats['tiles_searched']} tiles mapped, "
-        f"{search_stats['billed_calls']} billed Places calls ({search_stats.get('provider', 'google')})"
+        f"Coverage done: {len(businesses)} businesses in {search_stats.get('area', f'{radius / 1000:g} km radius')} "
+        f"({search_stats.get('provider', 'google')}), {search_stats['billed_calls']} billed Places calls"
     )
-    if search_stats["dense_tiles"]:
+    if search_stats.get("dense_tiles"):
         summary += f" ({search_stats['dense_tiles']} very dense tiles may be incomplete)"
     _broadcast(run_id, {"type": "status", "message": summary})
-    if search_stats["stopped"]:
+    logger.info(f"Run {run_id}: {summary}; categories={search_stats.get('niche_categories')}")
+    # Say how each niche was understood, and flag niches that found nothing
+    totals = search_stats.get("niche_totals", {})
+    for niche, info in search_stats.get("niche_categories", {}).items():
+        cats = ", ".join(info["categories"][:4]) or "business names only"
+        count = totals.get(niche, {}).get("total", 0)
+        msg = f"'{niche}' searched as: {cats} ({info['source']}) - {count} found"
+        if count == 0:
+            msg += ". Try a more common term (e.g. 'Carpenters' instead of 'Architectural Millwork')."
+        _broadcast(run_id, {"type": "status", "message": msg})
+    if search_stats.get("stopped"):
         _broadcast(run_id, {"type": "error", "message": f"Search stopped early, processing what was found: {search_stats['stopped']}"})
 
     # Competitor context for pitches: "14 of 22 roofers within 5 km have a website"
+    area_label = search_stats.get("area") if area_mode == "city" else None
     for b in businesses:
-        b["market_context"] = market_context(b.get("niches") or [], search_stats.get("niche_totals", {}), radius)
-
-    # Businesses already in the CRM under this place_id (duplicate emails are checked after enrichment)
-    new_businesses = []
-    for b in businesses:
-        if is_business_already_processed(b["place_id"]):
-            _broadcast(run_id, {
-                "type": "skipped",
-                "name": b.get("name", "Unknown"),
-                "reason": "duplicate",
-                "message": f"Skipping duplicate: {b.get('name')} (already processed in CRM)"
-            })
-        else:
-            new_businesses.append(b)
-    businesses = new_businesses
+        b["market_context"] = market_context(b.get("niches") or [], totals, final_radius, area_label)
 
     run["stats"]["found"] = len(businesses)
     update_search_run(run_id, len(businesses), "running")
@@ -672,47 +582,97 @@ def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: 
         ],
     })
 
-    # Step 2: Immediately store every found business in CRM + link to run
-    for b in businesses:
-        upsert_business({
-            "place_id": b["place_id"],
-            "name": b["name"],
-            "address": b["address"],
-            "phone": b.get("phone"),
-            "category": b.get("category"),
-            "website": b.get("website"),
-            "rating": b.get("rating"),
-            "review_count": b.get("review_count"),
-            "latitude": b.get("latitude"),
-            "longitude": b.get("longitude"),
-            "timezone": b.get("timezone"),
-            "international_phone": b.get("international_phone"),
-            "niches": ", ".join(b.get("niches") or []) or None,
-            "market_context": b.get("market_context"),
-            "approval_status": "pending",
-            "send_status": "not_sent",
-        })
-        link_business_to_run(run_id, b["place_id"])
-
-    # Step 3: Process each business through the enrichment pipeline
-    with get_checkpointer_cm() as checkpointer:
-        graph_app = build_graph(checkpointer)
-
-        for i, business in enumerate(businesses):
-            _process_single_business(
-                run_id, graph_app, business, i + 1, len(businesses)
-            )
-
-    # Auto-save CSV to disk
     try:
-        _write_run_csv_to_disk(run_id)
-    except Exception as e:
-        logger.error(f"Failed to auto-save CSV: {e}")
+        # Step 2: Store every found business in CRM + link to run
+        for b in businesses:
+            existing = get_business(b["place_id"])
+            if not existing:
+                upsert_business({
+                    "place_id": b["place_id"],
+                    "name": b["name"],
+                    "address": b["address"],
+                    "phone": b.get("phone"),
+                    "international_phone": b.get("international_phone"),
+                    "category": b.get("category"),
+                    "website": b.get("website"),
+                    "rating": b.get("rating"),
+                    "review_count": b.get("review_count"),
+                    "latitude": b.get("latitude"),
+                    "longitude": b.get("longitude"),
+                    "timezone": b.get("timezone"),
+                    "niches": ", ".join(b.get("niches") or []) or None,
+                    "market_context": b.get("market_context"),
+                    "contact_sources": b.get("contact_sources"),
+                    "approval_status": "pending",
+                    "send_status": "not_sent",
+                })
+            link_business_to_run(run_id, b["place_id"])
 
-    # Done
-    run["status"] = "complete"
-    update_search_run(run_id, len(businesses), "complete")
-    _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
+        # Step 3: Process each business through the enrichment pipeline
+        with get_checkpointer_cm() as checkpointer:
+            graph_app = build_graph(checkpointer)
+
+            for i, business in enumerate(businesses):
+                place_id = business["place_id"]
+                name = business["name"]
+
+                # Already contacted or unsubscribed
+                if is_business_already_processed(place_id, name):
+                    _broadcast(run_id, {
+                        "type": "skipped",
+                        "name": name,
+                        "reason": "duplicate",
+                        "message": f"Already contacted: {name}"
+                    })
+                    continue
+
+                # Already enriched in CRM (has a lead_score): reuse instead of re-crawling
+                existing = get_business(place_id)
+                if existing and existing.get("lead_score") is not None:
+                    quality = existing.get("website_quality")
+                    if quality == "good":
+                        run["stats"]["good_website"] += 1
+                    else:
+                        run["stats"]["qualified"] += 1
+                        if existing.get("email"):
+                            run["stats"]["emails_found"] += 1
+                    if existing.get("owner_name"):
+                        run["stats"]["owners_found"] += 1
+
+                    _broadcast(run_id, {
+                        "type": "drafted",
+                        "place_id": place_id,
+                        "name": name,
+                        "lead_score": existing.get("lead_score"),
+                        "has_pitch": bool(existing.get("pitch_body")),
+                    })
+                    continue
+
+                # Not yet enriched -> run through graph
+                _process_single_business(
+                    run_id, graph_app, business, i + 1, len(businesses)
+                )
+
+        # Auto-save CSV to disk
+        try:
+            _write_run_csv_to_disk(run_id)
+        except Exception as e:
+            logger.error(f"Failed to auto-save CSV: {e}")
+
+        # Done
+        run["status"] = "complete"
+        update_search_run(run_id, len(businesses), "complete")
+        _broadcast(run_id, {"type": "complete", "stats": run["stats"]})
+
+    except Exception as e:
+        logger.error(f"Error during pipeline execution for run {run_id}: {e}", exc_info=True)
+        run["status"] = "error"
+        update_search_run(run_id, len(businesses), "error")
+        _broadcast(run_id, {
+            "type": "error",
+            "message": f"Pipeline execution failed: {str(e)}",
+            "stats": run["stats"],
+        })
 
 
 def _process_single_business(run_id: str, graph_app, business: dict,
@@ -767,9 +727,8 @@ def _process_single_business(run_id: str, graph_app, business: dict,
 
     run["stats"]["qualified"] += 1
     if result.get("email"):
-        # Another business already emailed/queued at this address. Exclude this lead's
-        # own row: save_to_crm has just queued it, so matching it would flag every lead.
-        if is_email_already_contacted(result["email"], exclude_place_id=place_id):
+        # Only matches leads already sent or unsubscribed, so a lead never matches itself.
+        if is_business_already_processed("", "", result["email"]):
             logger.info(f"Skipping {name} — duplicate email {result['email']} already processed.")
             result["send_status"] = "skipped_duplicate"
             upsert_business(result)
@@ -782,7 +741,6 @@ def _process_single_business(run_id: str, graph_app, business: dict,
             return
         run["stats"]["emails_found"] += 1
 
-    # In sniper mode, the pipeline finishes on its own. It doesn't pause.
     _broadcast(run_id, {
         "type": "drafted",
         "place_id": place_id,
@@ -905,8 +863,9 @@ async def add_suppression(request: Request):
 
 # ── Entry point ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import os
     import uvicorn
-    print("\n  🗺️  Maps Outreach Agent (Sniper Mode)")
-    print("  Dashboard: http://localhost:8000\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
-
+    port = int(os.getenv("PORT", "8000"))  # Render sets $PORT
+    print("\n  🗺️  Maps Outreach Agent")
+    print(f"  Dashboard: http://localhost:{port}\n")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

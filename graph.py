@@ -8,7 +8,7 @@ Builds the per-business LangGraph pipeline (Sniper Workflow):
        +---(prospect)---> find_contacts -> score_lead -> analyze_business
                                                                              |
                                                                              v
-                                                                      generate_pitch
+                                                               generate_outreach_kit
                                                                              |
                                                                              v
                                                                        save_to_crm
@@ -17,7 +17,8 @@ Builds the per-business LangGraph pipeline (Sniper Workflow):
                                                                             END
 
 The pipeline no longer pauses for human approval or attempts to send emails.
-It runs start-to-finish for all prospects, drafting pitches and saving to CRM
+It runs start-to-finish for all prospects, building an outreach kit (analysis,
+mockup prompt, email draft) and saving to CRM
 so the user can manually review and contact them via the dashboard.
 """
 from langgraph.graph import END, StateGraph
@@ -26,13 +27,13 @@ from nodes.business_analyzer import analyze_business
 from nodes.crm_writer import save_to_crm
 from nodes.contact_finder import find_contacts
 from nodes.lead_scorer import score_lead
-from nodes.pitch_generator import generate_pitch
+from nodes.outreach_kit_generator import generate_outreach_kit
 from nodes.website_check import check_website
 from state import BusinessState
 
 
 def _route_after_score(state: BusinessState) -> str:
-    """Skip pitch generation if website is good, but keep all extracted data."""
+    """Skip outreach kit generation if website is good, but keep all extracted data."""
     if state.get("website_quality") == "good":
         return "save_to_crm_skip"
     return "analyze_business"
@@ -45,7 +46,7 @@ def build_graph(checkpointer=None):
     graph.add_node("find_contacts", find_contacts)
     graph.add_node("score_lead", score_lead)
     graph.add_node("analyze_business", analyze_business)
-    graph.add_node("generate_pitch", generate_pitch)
+    graph.add_node("generate_outreach_kit", generate_outreach_kit)
     graph.add_node("save_to_crm_skip", save_to_crm)
     graph.add_node("save_to_crm", save_to_crm)
 
@@ -56,7 +57,7 @@ def build_graph(checkpointer=None):
     graph.add_edge("check_website", "find_contacts")
     graph.add_edge("find_contacts", "score_lead")
 
-    # Score gate: if good website, skip pitch. Else generate pitch.
+    # Score gate: if good website, skip outreach kit. Else generate outreach kit.
     graph.add_conditional_edges(
         "score_lead",
         _route_after_score,
@@ -64,8 +65,8 @@ def build_graph(checkpointer=None):
     )
 
     # Full pipeline
-    graph.add_edge("analyze_business", "generate_pitch")
-    graph.add_edge("generate_pitch", "save_to_crm")
+    graph.add_edge("analyze_business", "generate_outreach_kit")
+    graph.add_edge("generate_outreach_kit", "save_to_crm")
     
     # End points
     graph.add_edge("save_to_crm_skip", END)

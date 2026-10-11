@@ -1,780 +1,862 @@
-/* ═══════════════════════════════════════════════════════════════
-   Maps Outreach Agent — Dashboard Frontend Logic (Sniper Mode)
-   ═══════════════════════════════════════════════════════════════ */
+/**
+ * GeoProspector AI — Manual Outreach Field-Log & Workbench Engine
+ */
 
-(() => {
-  'use strict';
-
-  // ── State ──────────────────────────────────────────────────
-  let currentRunId = null;
-  let ws = null;
-  let allLeads = {};  // place_id -> data
-  let currentModalPlaceId = null;
-
-  // ── DOM refs ───────────────────────────────────────────────
-  const $ = (sel) => document.querySelector(sel);
-  const searchForm      = $('#searchForm');
-  const searchBtn       = $('#searchBtn');
-  const suggestBtn      = $('#suggestBtn');
-  const autoPilotBtn    = $('#autoPilotBtn');
-  // ── Toast Notification Helper ──────────────────────────────
-  function showToast(msg, type = 'info', duration = 6000) {
-    let container = document.getElementById('toastContainer');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'toastContainer';
-      document.body.appendChild(container);
-    }
-    const toast = document.createElement('div');
-    toast.className = `toast toast--${type}`;
-    toast.innerHTML = `<span style="font-size:1.2rem;">${type==='success'?'✅':type==='error'?'⚠️':'ℹ️'}</span><div style="flex:1;">${msg.replace(/\n/g,'<br>')}</div>`;
-    toast.onclick = () => toast.remove();
-    container.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(10px) scale(0.95)';
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
+let state = {
+  activeTab: 'potential', // 'potential' | 'queue' | 'good'
+  leads: [],
+  activeRunId: null,
+  ws: null,
+  sortColumn: 'score', // 'score' | 'date' | 'name'
+  sortDirection: 'desc', // 'desc' | 'asc'
+  currentPage: 1,
+  pageSize: 25, // default 25 per page
+  filters: {
+    search: '',
+    category: '',
+    condition: '',
+    minScore: 0,
   }
+};
 
-  // ── Auto-Pilot Handler ─────────────────────────────────────
-  if (autoPilotBtn) {
-    autoPilotBtn.addEventListener('click', async () => {
-      if (!window._confirmAutoPilot) {
-        window._confirmAutoPilot = true;
-        showToast("⚡ Click 'Run Daily Auto-Pilot' again within 5 seconds to confirm launching today's campaign (up to 20 emails).", "info", 6000);
-        autoPilotBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
-        autoPilotBtn.innerHTML = '<span>⚠️</span> Click Again to Confirm Launch';
-        setTimeout(() => {
-          window._confirmAutoPilot = false;
-          autoPilotBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
-          autoPilotBtn.innerHTML = '<span>⚡</span> Run Daily Auto-Pilot (20 Leads)';
-        }, 5000);
-        return;
-      }
-      window._confirmAutoPilot = false;
-      autoPilotBtn.disabled = true;
-      const originalHtml = '<span>⚡</span> Run Daily Auto-Pilot (20 Leads)';
-      autoPilotBtn.innerHTML = '<span>⏳</span> Starting Auto-Pilot...';
-      showToast("⚡ Launching Daily Auto-Pilot sequence...", "info");
+// ── DOM Element References ──────────────────────────────────────────────
+const searchForm = document.getElementById('searchForm');
+const queryInput = document.getElementById('query');
+const locationInput = document.getElementById('location');
+const radiusInput = document.getElementById('radius');
+const searchBtn = document.getElementById('searchBtn');
+const exportBtn = document.getElementById('exportBtn');
+const suggestBtn = document.getElementById('suggestBtn');
+const logoutBtn = document.getElementById('logoutBtn');
 
-      try {
-        const resp = await fetch('/api/campaign/run_daily', { method: 'POST' });
-        const data = await resp.json();
-        
-        if (data.success) {
-          showToast(`⚡ Auto-Pilot Started!\nDispatched from queue: ${data.dispatched_from_queue} emails\nToday's Total Sent: ${data.daily_sent_total}/20\nNext Target: ${data.target.display_name}`, "success", 10000);
-          setTimeout(() => window.location.reload(), 3000);
-        } else {
-          showToast('Error: ' + (data.error || 'Failed to start auto-pilot'), "error", 8000);
-        }
-      } catch (e) {
-        console.error('Auto-Pilot error:', e);
-        showToast('Network error starting auto-pilot.', "error");
-      } finally {
-        autoPilotBtn.disabled = false;
-        autoPilotBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
-        autoPilotBtn.innerHTML = originalHtml;
-      }
-    });
-  }
-  const progressSection = $('#progressSection');
-  const progressBar     = $('#progressBar');
-  const progressStatus  = $('#progressStatus');
-  const eventFeed       = $('#eventFeed');
-  const leadsContent    = $('#leadsContent');
-  const approvalModal   = $('#approvalModal');
-  const modalTitle      = $('#modalTitle');
-  const modalDetails    = $('#modalDetails');
-  const modalScoreBreakdown = $('#modalScoreBreakdown');
-  const editSubject     = $('#editSubject');
-  const editBody        = $('#editBody');
+// Filter Inputs
+const filterSearch = document.getElementById('filterSearch');
+const filterCategory = document.getElementById('filterCategory');
+const filterCondition = document.getElementById('filterCondition');
+const filterMinScore = document.getElementById('filterMinScore');
+const resetFiltersBtn = document.getElementById('resetFiltersBtn');
 
-  // Stats
-  const statFound     = $('#statFound');
-  const statQualified = $('#statQualified');
-  const statEmails    = $('#statEmails');
-  const statApproved  = $('#statApproved');
-  const statSent      = $('#statSent');
-  const statSkipped   = $('#statSkipped');
+// Tabs
+const tabPotentialBtn = document.getElementById('tabPotentialBtn');
+const tabQueueBtn = document.getElementById('tabQueueBtn');
+const tabGoodBtn = document.getElementById('tabGoodBtn');
 
-  // ── Helpers ────────────────────────────────────────────────
+const tabPotentialContent = document.getElementById('tabPotentialContent');
+const tabQueueContent = document.getElementById('tabQueueContent');
+const tabGoodContent = document.getElementById('tabGoodContent');
 
-  function scoreBadge(score) {
-    if (score == null) return '';
-    const cls = score >= 70 ? 'high' : score >= 50 ? 'mid' : 'low';
-    return `<span class="score-badge score-badge--${cls}">${score}</span>`;
-  }
+const badgePotential = document.getElementById('badgePotential');
+const badgeQueue = document.getElementById('badgeQueue');
+const badgeGood = document.getElementById('badgeGood');
 
-  function qualityBadge(quality) {
-    if (!quality) return '';
-    const map = {
-      none: 'none', dead: 'dead', social_only: 'social',
-      outdated: 'outdated', good: 'good',
-    };
-    const labels = {
-      none: 'No Site', dead: 'Dead', social_only: 'Social Only',
-      outdated: 'Outdated', good: 'Good',
-    };
-    const cls = map[quality] || 'none';
-    return `<span class="quality-badge quality-badge--${cls}">${labels[quality] || quality}</span>`;
-  }
+const potentialTableBody = document.getElementById('potentialTableBody');
+const goodTableBody = document.getElementById('goodTableBody');
+const queueList = document.getElementById('queueList');
 
-  function statusBadge(status) {
-    if (!status) return '';
-    const map = {
-      pending: 'pending', approved: 'approved', sent: 'sent',
-      rejected: 'rejected', skipped: 'skipped',
-      not_sent: 'pending', no_email: 'skipped', failed: 'rejected',
-      pending_auto_send: 'approved',
-    };
-    const labels = {
-      pending: '⏳ Pending', approved: '✓ Approved', sent: '✉ Contacted',
-      rejected: '✕ Rejected', skipped: '⏭ Skipped',
-      not_sent: '⏳ Pending', no_email: '⏭ No Email', failed: '✕ Failed',
-      pending_auto_send: '⚡ Auto-Queue',
-    };
-    const cls = map[status] || 'pending';
-    const label = labels[status] || status;
-    return `<span class="status-badge status-badge--${cls}">${label}</span>`;
-  }
+const progressSection = document.getElementById('progressSection');
+const progressStatus = document.getElementById('progressStatus');
+const progressBar = document.getElementById('progressBar');
+const eventFeed = document.getElementById('eventFeed');
+const toastContainer = document.getElementById('toastContainer');
 
-  function animateNumber(el, target) {
-    const current = parseInt(el.textContent) || 0;
-    if (current === target) return;
-    const diff = target - current;
-    const steps = Math.min(Math.abs(diff), 20);
-    const increment = diff / steps;
-    let step = 0;
 
-    function tick() {
-      step++;
-      if (step >= steps) {
-        el.textContent = target;
+// ── Initialization ─────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  setupEventListeners();
+  fetchLeads();
+});
+
+
+function setupEventListeners() {
+  // Tabs
+  tabPotentialBtn.addEventListener('click', () => switchTab('potential'));
+  tabQueueBtn.addEventListener('click', () => switchTab('queue'));
+  tabGoodBtn.addEventListener('click', () => switchTab('good'));
+
+  // Search & Actions
+  searchForm.addEventListener('submit', handleSearchSubmit);
+  exportBtn.addEventListener('click', handleExportCSV);
+  suggestBtn.addEventListener('click', handleSuggestTarget);
+  logoutBtn.addEventListener('click', handleLogout);
+
+  // Filters (reset to Page 1 on change)
+  filterSearch.addEventListener('input', (e) => { state.filters.search = e.target.value; state.currentPage = 1; renderLeads(); });
+  filterCategory.addEventListener('change', (e) => { state.filters.category = e.target.value; state.currentPage = 1; renderLeads(); });
+  filterCondition.addEventListener('change', (e) => { state.filters.condition = e.target.value; state.currentPage = 1; renderLeads(); });
+  filterMinScore.addEventListener('input', (e) => { state.filters.minScore = parseInt(e.target.value) || 0; state.currentPage = 1; renderLeads(); });
+  resetFiltersBtn.addEventListener('click', resetFilters);
+
+  // Table Column Sort Headers
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.getAttribute('data-sort');
+      if (state.sortColumn === col) {
+        state.sortDirection = state.sortDirection === 'desc' ? 'asc' : 'desc';
       } else {
-        el.textContent = Math.round(current + increment * step);
-        requestAnimationFrame(tick);
+        state.sortColumn = col;
+        state.sortDirection = 'desc';
+      }
+      state.currentPage = 1;
+      updateSortIndicators();
+      renderLeads();
+    });
+  });
+}
+
+
+function resetFilters() {
+  state.filters.search = '';
+  state.filters.category = '';
+  state.filters.condition = '';
+  state.filters.minScore = 0;
+  state.currentPage = 1;
+
+  filterSearch.value = '';
+  filterCategory.value = '';
+  filterCondition.value = '';
+  filterMinScore.value = 0;
+
+  renderLeads();
+}
+
+
+function updateSortIndicators() {
+  ['score', 'date', 'name'].forEach(col => {
+    const el = document.getElementById(`sort-indicator-${col}`);
+    if (el) {
+      if (state.sortColumn === col) {
+        el.textContent = state.sortDirection === 'desc' ? '▼' : '▲';
+      } else {
+        el.textContent = '';
       }
     }
-    requestAnimationFrame(tick);
+  });
+}
+
+
+// ── Tab Management ──────────────────────────────────────────────────────
+function switchTab(tabName) {
+  if (state.activeTab !== tabName) {
+    state.currentPage = 1;
+  }
+  state.activeTab = tabName;
+  
+  [tabPotentialBtn, tabQueueBtn, tabGoodBtn].forEach(b => b.classList.remove('active'));
+  [tabPotentialContent, tabQueueContent, tabGoodContent].forEach(c => c.classList.add('hidden'));
+
+  if (tabName === 'potential') {
+    tabPotentialBtn.classList.add('active');
+    tabPotentialContent.classList.remove('hidden');
+  } else if (tabName === 'queue') {
+    tabQueueBtn.classList.add('active');
+    tabQueueContent.classList.remove('hidden');
+  } else if (tabName === 'good') {
+    tabGoodBtn.classList.add('active');
+    tabGoodContent.classList.remove('hidden');
+  }
+  renderLeads();
+}
+
+
+// ── Pagination Engine ───────────────────────────────────────────────────
+function goToPage(page) {
+  state.currentPage = page;
+  renderLeads();
+  window.scrollTo({ top: 400, behavior: 'smooth' });
+}
+
+function changePageSize(size) {
+  state.pageSize = parseInt(size) || 25;
+  state.currentPage = 1;
+  renderLeads();
+}
+
+function renderPagination(totalItems, elementId, isActiveTab) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (totalItems === 0) {
+    el.innerHTML = '';
+    return;
   }
 
-  function updateStats(stats) {
-    if (!stats) return;
-    animateNumber(statFound, stats.found || 0);
-    animateNumber(statQualified, stats.qualified || 0);
-    animateNumber(statEmails, stats.emails_found || 0);
-    animateNumber(statApproved, stats.approved || 0);
-    animateNumber(statSent, stats.sent || 0);
-    animateNumber(statSkipped, (stats.good_website || 0) + (stats.low_score || 0));
-  }
+  const totalPages = Math.ceil(totalItems / state.pageSize) || 1;
+  const currentPage = isActiveTab ? Math.min(Math.max(1, state.currentPage), totalPages) : 1;
+  const startIndex = totalItems === 0 ? 0 : (currentPage - 1) * state.pageSize + 1;
+  const endIndex = Math.min(currentPage * state.pageSize, totalItems);
 
-  // ── Event feed ─────────────────────────────────────────────
-
-  function addEvent(iconClass, emoji, name, detail, actionHtml = '') {
-    const item = document.createElement('div');
-    item.className = 'event-item';
-    item.innerHTML = `
-      <div class="event-item__icon event-item__icon--${iconClass}">${emoji}</div>
-      <div class="event-item__text">
-        <div class="event-item__name">${name}</div>
-        <div class="event-item__detail">${detail}</div>
+  el.innerHTML = `
+    <div class="pagination-info">
+      Showing <strong>${startIndex}–${endIndex}</strong> of <strong>${totalItems}</strong> leads
+    </div>
+    <div class="pagination-controls">
+      <label class="pagination-size-label">
+        Per page:
+        <select class="pagination-size-select" onchange="changePageSize(this.value)">
+          <option value="25" ${state.pageSize === 25 ? 'selected' : ''}>25</option>
+          <option value="50" ${state.pageSize === 50 ? 'selected' : ''}>50</option>
+          <option value="100" ${state.pageSize === 100 ? 'selected' : ''}>100</option>
+          <option value="250" ${state.pageSize === 250 ? 'selected' : ''}>250</option>
+        </select>
+      </label>
+      <div class="pagination-pages">
+        <button class="btn btn--outline btn--sm" onclick="goToPage(1)" ${currentPage === 1 ? 'disabled' : ''}>« First</button>
+        <button class="btn btn--outline btn--sm" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>‹ Prev</button>
+        <span class="pagination-page-num mono">Page ${currentPage} of ${totalPages}</span>
+        <button class="btn btn--outline btn--sm" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next ›</button>
+        <button class="btn btn--outline btn--sm" onclick="goToPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}>Last »</button>
       </div>
-      ${actionHtml ? `<div class="event-item__actions">${actionHtml}</div>` : ''}
-    `;
-    eventFeed.prepend(item);
-    return item;
-  }
+    </div>
+  `;
+}
 
-  // ── Leads table ────────────────────────────────────────────
 
-  async function loadLeads() {
-    try {
-      const resp = await fetch('/api/leads');
-      const leads = await resp.json();
-      
-      // Update global cache
-      allLeads = {};
-      leads.forEach(l => allLeads[l.place_id] = l);
-      
-      renderLeadsTable(leads);
-    } catch (e) {
-      console.error('Failed to load leads:', e);
-    }
-  }
-
-  function renderLeadsTable(leads) {
-    if (!leads || leads.length === 0) {
-      leadsContent.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state__icon">🗺️</div>
-          <div class="empty-state__text">Run a search to discover leads</div>
-        </div>`;
+// ── Data Fetching & Rendering ───────────────────────────────────────────
+async function fetchLeads() {
+  try {
+    const res = await fetch('/api/leads');
+    if (res.status === 401) {
+      window.location.href = '/login';
       return;
     }
-
-    let rows = leads.map(l => {
-      // Show review button if it's not skipped/good website
-      const showReview = l.website_quality !== 'good';
-      
-      return `
-      <tr>
-        <td><span class="leads-table__name">${esc(l.name || '')}</span></td>
-        <td>${scoreBadge(l.lead_score)}</td>
-        <td>${qualityBadge(l.website_quality)}</td>
-        <td class="leads-table__email">${l.email ? esc(l.email) : '<span style="color:var(--text-muted)">—</span>'}</td>
-        <td>${l.facebook_url ? '📘' : ''}${l.instagram_url ? ' 📷' : ''}</td>
-        <td>${l.open_count > 0 ? `<span class="status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">👀 Opened (${l.open_count})</span>` : statusBadge(l.send_status === 'sent' ? 'sent' : (l.send_status === 'pending_auto_send' ? 'pending_auto_send' : l.approval_status))}</td>
-        <td>
-          ${showReview
-            ? `<button class="btn btn--primary btn--sm" onclick="window.__openModal('${esc(l.place_id)}')">Review</button>`
-            : ''
-          }
-        </td>
-      </tr>
-      `;
-    }).join('');
-
-    leadsContent.innerHTML = `
-      <div class="leads-table-wrap">
-        <table class="leads-table">
-          <thead>
-            <tr>
-              <th>Business</th>
-              <th>Score</th>
-              <th>Website</th>
-              <th>Email</th>
-              <th>Social</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+    const data = await res.json();
+    state.leads = Array.isArray(data) ? data : (data.leads || []);
+    populateCategoryFilter();
+    renderLeads();
+  } catch (err) {
+    showToast('Error loading leads: ' + err.message, 'error');
   }
+}
 
-  function esc(str) {
-    if (str === null || str === undefined) return '';
-    // Also escapes quotes: values are used inside href="..." attributes too
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
 
-  // ── Export ─────────────────────────────────────────────────
-  exportBtn.addEventListener('click', () => {
-    window.location.href = `/api/runs/${currentRunId || 'all'}/csv`;
+function populateCategoryFilter() {
+  if (!filterCategory) return;
+  const currentVal = state.filters.category;
+  const categories = new Set();
+  state.leads.forEach(l => {
+    if (l.category && l.category.trim()) categories.add(l.category.trim());
   });
+  const sortedCats = Array.from(categories).sort();
+  filterCategory.innerHTML = '<option value="">All Categories</option>' +
+    sortedCats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  filterCategory.value = currentVal;
+}
 
-  // ── Modal ──────────────────────────────────────────────────
 
-  function linkHtml(url, label) {
-    if (!url || !/^https?:\/\//i.test(url)) return '—';
-    return `<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(label || url)}</a>`;
-  }
-
-  function ownerHtml(d) {
-    if (!d.owner_name) return '<span style="color:var(--text-muted)">Not identified</span>';
-    const role = d.owner_role ? ` <span style="color:var(--text-muted)">(${esc(d.owner_role)})</span>` : '';
-    const li = d.owner_linkedin ? ` · ${linkHtml(d.owner_linkedin, 'LinkedIn')}` : '';
-    return `👤 ${esc(d.owner_name)}${role}${li}`;
-  }
-
-  function otherContactsHtml(d) {
-    let c;
-    try { c = JSON.parse(d.contacts_json || '{}'); } catch (e) { return '—'; }
-    const lines = [];
-    (c.people || []).filter(p => p.name !== d.owner_name).slice(0, 5).forEach(p => {
-      const bits = [esc(p.name)];
-      if (p.role) bits.push(`<span style="color:var(--text-muted)">${esc(p.role)}</span>`);
-      if (p.email) bits.push(esc(p.email));
-      if (p.linkedin) bits.push(linkHtml(p.linkedin, 'LinkedIn'));
-      lines.push(bits.join(' · '));
-    });
-    const otherEmails = (c.emails || []).map(e => e.value).filter(e => e !== d.email);
-    if (otherEmails.length) lines.push('✉ ' + otherEmails.slice(0, 4).map(esc).join(', '));
-    const phones = (c.phones || []).slice(0, 3);
-    if (phones.length) lines.push('📞 ' + phones.map(esc).join(', '));
-    return lines.length ? lines.join('<br>') : '—';
-  }
-
-  window.__openModal = async function(placeId) {
-    // If we don't have full details, fetch them
-    let data = allLeads[placeId];
-    if (!data || !data.pitch_body) {
-      const resp = await fetch(`/api/leads/${placeId}`);
-      data = await resp.json();
-      allLeads[placeId] = data;
+function applyFiltersAndSort(leadList) {
+  return leadList.filter(l => {
+    // Text search (matches name, address, category, phone)
+    if (state.filters.search) {
+      const q = state.filters.search.toLowerCase();
+      const nameMatch = (l.name || '').toLowerCase().includes(q);
+      const addrMatch = (l.address || '').toLowerCase().includes(q);
+      const catMatch = (l.category || '').toLowerCase().includes(q);
+      const phoneMatch = (l.phone || '').toLowerCase().includes(q);
+      if (!nameMatch && !addrMatch && !catMatch && !phoneMatch) return false;
     }
 
-    if (!data) return;
-    currentModalPlaceId = placeId;
+    // Category filter
+    if (state.filters.category && (l.category || '') !== state.filters.category) {
+      return false;
+    }
 
-    modalTitle.textContent = `Review — ${data.name || 'Business'}`;
+    // Site condition filter
+    if (state.filters.condition && (l.website_quality || 'none') !== state.filters.condition) {
+      return false;
+    }
 
-    // Build detail grid
-    const details = [
-      ['Score', scoreBadge(data.lead_score)],
-      ['Website', qualityBadge(data.website_quality)],
-      ['Email', data.email ? `<span class="leads-table__email">${esc(data.email)}</span>` : '<span style="color:var(--text-muted)">Not found</span>'],
-      ['Language', data.email_language ? `<span style="color:#10b981;font-weight:600;">🗣️ ${esc(data.email_language)}</span>` : 'English'],
-      ['Tracking', data.open_count > 0 ? `<span style="color:#10b981;font-weight:600;">👀 Opened ${data.open_count} time(s)</span>` : (data.sent_at ? `✉ Sent at ${data.sent_at}` : 'Not dispatched yet')],
-      ['Owner', ownerHtml(data)],
-      ['Phone', esc([data.phone, data.international_phone].filter(Boolean).join(' · ') || '—')],
-      ['Rating', data.rating ? `${data.rating}★ (${data.review_count || 0} reviews)` : '—'],
-      ['Category', esc(data.category || '—')],
-      ['Facebook', data.facebook_url ? `<a href="${esc(data.facebook_url)}" target="_blank" style="color:var(--accent)">${esc(data.facebook_url)}</a>` : '—'],
-      ['Instagram', data.instagram_url ? `<a href="${esc(data.instagram_url)}" target="_blank" style="color:var(--accent)">${esc(data.instagram_url)}</a>` : '—'],
-      ['Company LinkedIn', linkHtml(data.company_linkedin)],
-      ['Niches', esc(data.niches || '—')],
-      ['Other contacts', otherContactsHtml(data)],
-      ['Address', esc(data.address || '—')],
-    ];
+    // Minimum score filter
+    const score = l.lead_score || 0;
+    if (score < state.filters.minScore) {
+      return false;
+    }
 
-    modalDetails.innerHTML = details.map(([label, value]) => `
-      <div class="modal__detail">
-        <div class="modal__detail-label">${label}</div>
-        <div class="modal__detail-value">${value}</div>
-      </div>
-    `).join('');
+    return true;
+  }).sort((a, b) => {
+    let valA, valB;
+    if (state.sortColumn === 'score') {
+      valA = a.lead_score || 0;
+      valB = b.lead_score || 0;
+    } else if (state.sortColumn === 'date') {
+      valA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      valB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    } else if (state.sortColumn === 'name') {
+      valA = (a.name || '').toLowerCase();
+      valB = (b.name || '').toLowerCase();
+      return state.sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    }
 
-    // Score breakdown
-    modalScoreBreakdown.textContent = data.score_breakdown || 'No breakdown available';
+    if (state.sortDirection === 'asc') {
+      return valA > valB ? 1 : valA < valB ? -1 : 0;
+    } else {
+      return valA < valB ? 1 : valA > valB ? -1 : 0;
+    }
+  });
+}
 
-    // Pitch fields
-    editSubject.value = data.pitch_subject || '';
-    editBody.value = data.pitch_body || '';
-    editSubject.readOnly = false;
-    editBody.readOnly = false;
-    editSubject.style.opacity = '1';
-    editBody.style.opacity = '1';
 
-    approvalModal.classList.add('active');
+function renderLeads() {
+  // 1. Separate into raw categories
+  const rawPotential = state.leads.filter(l => 
+    (l.website_quality || 'none') !== 'good' &&
+    l.send_status !== 'sent' && l.send_status !== 'unsubscribed' &&
+    (!l.pitch_body || l.pitch_body.trim() === '')
+  );
+
+  const rawQueue = state.leads.filter(l => 
+    (l.website_quality || 'none') !== 'good' &&
+    l.send_status !== 'sent' && l.send_status !== 'unsubscribed' &&
+    l.pitch_body && l.pitch_body.trim() !== ''
+  );
+
+  const rawGood = state.leads.filter(l => (l.website_quality || 'none') === 'good');
+
+  // 2. Apply composable filters and sort
+  const filteredPotential = applyFiltersAndSort(rawPotential);
+  const filteredQueue = applyFiltersAndSort(rawQueue);
+  const filteredGood = applyFiltersAndSort(rawGood);
+
+  // 3. Update badges to show filtered count
+  badgePotential.textContent = filteredPotential.length;
+  badgeQueue.textContent = filteredQueue.length;
+  badgeGood.textContent = filteredGood.length;
+
+  // 4. Calculate pagination slicing for active vs inactive tabs
+  const getPagedSlice = (items, tabKey) => {
+    if (state.activeTab !== tabKey) return items.slice(0, state.pageSize);
+    const totalPages = Math.ceil(items.length / state.pageSize) || 1;
+    if (state.currentPage > totalPages) state.currentPage = totalPages;
+    if (state.currentPage < 1) state.currentPage = 1;
+    const start = (state.currentPage - 1) * state.pageSize;
+    return items.slice(start, start + state.pageSize);
   };
 
-  function closeModal() {
-    approvalModal.classList.remove('active');
-    currentModalPlaceId = null;
+  const pagedPotential = getPagedSlice(filteredPotential, 'potential');
+  const pagedQueue = getPagedSlice(filteredQueue, 'queue');
+  const pagedGood = getPagedSlice(filteredGood, 'good');
+
+  // 5. Render tables/cards
+  renderPotentialTable(pagedPotential);
+  renderQueueCards(pagedQueue);
+  renderGoodTable(pagedGood);
+
+  // 6. Render pagination bars
+  renderPagination(filteredPotential.length, 'potentialPagination', state.activeTab === 'potential');
+  renderPagination(filteredQueue.length, 'queuePagination', state.activeTab === 'queue');
+  renderPagination(filteredGood.length, 'goodPagination', state.activeTab === 'good');
+}
+
+
+function renderPotentialTable(leads) {
+  if (leads.length === 0) {
+    potentialTableBody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center; padding:36px; color:var(--text-muted);">
+          No prospect businesses match current filters. Adjust search or filters above!
+        </td>
+      </tr>
+    `;
+    return;
   }
 
-  async function copyPitch() {
-    const text = `Subject: ${editSubject.value}\n\n${editBody.value}`;
-    try {
-      await navigator.clipboard.writeText(text);
-      const btn = $('#btnCopy');
-      const originalText = btn.textContent;
-      btn.textContent = '✓ Copied!';
-      setTimeout(() => btn.textContent = originalText, 2000);
-    } catch (e) {
-      console.error('Failed to copy', e);
+  potentialTableBody.innerHTML = leads.map(l => {
+    const condition = l.website_quality || 'none';
+    let stampClass = 'stamp--rust';
+    if (condition === 'outdated') stampClass = 'stamp--amber';
+
+    const score = l.lead_score || 0;
+    let scoreStamp = 'stamp--rust';
+    if (score >= 70) scoreStamp = 'stamp--teal';
+    else if (score >= 40) scoreStamp = 'stamp--amber';
+
+    const dateStr = l.created_at ? new Date(l.created_at).toLocaleDateString() : '—';
+
+    return `
+      <tr>
+        <td>
+          <strong style="color:var(--text-ink);">${escapeHtml(l.name || 'Unnamed Business')}</strong>
+          ${l.phone ? `<div class="mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">${escapeHtml(l.phone)}</div>` : ''}
+        </td>
+        <td style="color:var(--text-muted);">${escapeHtml(l.category || 'Local Business')}</td>
+        <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(l.address || '—')}</td>
+        <td>
+          <span class="stamp ${stampClass}">${condition.toUpperCase()}</span>
+        </td>
+        <td>
+          <span class="stamp ${scoreStamp}">${score}/100</span>
+        </td>
+        <td class="mono" style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
+        <td style="text-align:right;">
+          <button class="btn btn--sm" onclick="buildOutreachKit('${l.place_id}')">
+            Build Kit
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+
+function renderGoodTable(leads) {
+  if (leads.length === 0) {
+    goodTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; padding:36px; color:var(--text-muted);">
+          No businesses with good websites match current filters.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  goodTableBody.innerHTML = leads.map(l => {
+    const score = l.lead_score || 0;
+    let scoreStamp = 'stamp--rust';
+    if (score >= 70) scoreStamp = 'stamp--teal';
+    else if (score >= 40) scoreStamp = 'stamp--amber';
+
+    const dateStr = l.created_at ? new Date(l.created_at).toLocaleDateString() : '—';
+
+    return `
+      <tr>
+        <td>
+          <strong style="color:var(--text-ink);">${escapeHtml(l.name || 'Unnamed Business')}</strong>
+          ${l.phone ? `<div class="mono" style="font-size:11px; color:var(--text-muted); margin-top:2px;">${escapeHtml(l.phone)}</div>` : ''}
+        </td>
+        <td style="color:var(--text-muted);">${escapeHtml(l.category || 'Local Business')}</td>
+        <td style="font-size:12px; color:var(--text-muted);">${escapeHtml(l.address || '—')}</td>
+        <td style="font-size:12px;">
+          ${l.website ? `<a href="${escapeHtml(l.website)}" target="_blank" style="color:var(--accent-teal); text-decoration:none;">${escapeHtml(l.website.replace(/^https?:\/\//, ''))}</a>` : '—'}
+        </td>
+        <td>
+          <span class="stamp ${scoreStamp}">${score}/100</span>
+        </td>
+        <td class="mono" style="font-size:12px; color:var(--text-muted);">${dateStr}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+
+function safeLink(url, label) {
+  if (!url || !/^https?:\/\//i.test(url)) return '';
+  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--accent-teal); text-decoration:none;">${escapeHtml(label)}</a>`;
+}
+
+// Owner, reviews and local competition: the personalisation the draft is built on.
+function leadContextHtml(l) {
+  const bits = [];
+  if (l.owner_name) {
+    const li = safeLink(l.owner_linkedin, 'LinkedIn');
+    bits.push(`👤 ${escapeHtml(l.owner_name)}${l.owner_role ? ' (' + escapeHtml(l.owner_role) + ')' : ''}${li ? ' · ' + li : ''}`);
+  }
+  if (l.review_count) {
+    const src = l.review_source && l.review_source !== 'their website' ? ` on ${l.review_source}` : '';
+    const stars = l.rating ? `${l.rating}★ · ` : '';
+    const label = `${stars}${l.review_count} reviews${src}`;  // plain text; escaped once below
+    bits.push(`⭐ ${safeLink(l.review_url, label) || escapeHtml(label)}`);
+  }
+  if (l.market_context) bits.push(`📊 ${escapeHtml(l.market_context)}`);
+  const company = safeLink(l.company_linkedin, 'Company LinkedIn');
+  if (company) bits.push(company);
+  if (!bits.length) return '';
+  return `<div class="queue-card__meta" style="margin-top:4px;">${bits.join(' &bull; ')}</div>`;
+}
+
+function renderQueueCards(leads) {
+  if (leads.length === 0) {
+    queueList.innerHTML = `
+      <div style="text-align:center; padding:48px; color:var(--text-muted);">
+        No outreach kits match current filters. Adjust filters or click <b>"Build Kit"</b> on a lead!
+      </div>
+    `;
+    return;
+  }
+
+  queueList.innerHTML = leads.map(l => {
+    const email = l.email || '';
+    const subject = l.pitch_subject || '';
+    const body = l.pitch_body || '';
+    const prompt = l.mockup_prompt || '';
+    const analysis = l.analysis || 'Analysis pending.';
+
+    const score = l.lead_score || 0;
+    let scoreStamp = 'stamp--rust';
+    if (score >= 70) scoreStamp = 'stamp--teal';
+    else if (score >= 40) scoreStamp = 'stamp--amber';
+
+    const mailtoUrl = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    return `
+      <div class="queue-card" id="card-${l.place_id}">
+        <div class="queue-card__header">
+          <div>
+            <div class="queue-card__title" style="display:flex; align-items:center; gap:10px;">
+              <span>${escapeHtml(l.name || 'Unnamed Business')}</span>
+              <span class="stamp ${scoreStamp}">${score}/100</span>
+            </div>
+            <div class="queue-card__meta">
+              ${l.category ? escapeHtml(l.category) + ' &bull; ' : ''}
+              ${l.email ? `📧 <span style="color:var(--accent-teal-dark);">${escapeHtml(l.email)}</span>` : '<span style="color:var(--stamp-rust);">No email found</span>'}
+              ${l.phone ? ' &bull; 📞 ' + escapeHtml(l.phone) : ''}
+            </div>
+            ${leadContextHtml(l)}
+          </div>
+          <span class="stamp stamp--amber">READY TO SEND</span>
+        </div>
+
+        <!-- Section 1: Analysis Summary -->
+        <div class="queue-card__section">
+          <div class="queue-card__section-label">1. Analysis Brief & Pitch Angle</div>
+          <div class="analysis-box">${escapeHtml(analysis)}</div>
+        </div>
+
+        <!-- Section 2: Lovable Mockup Prompt -->
+        <div class="queue-card__section">
+          <div class="queue-card__section-label" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>2. Lovable.dev / AI Site Builder Mockup Prompt</span>
+            <button class="btn btn--outline btn--sm" onclick="copyPrompt('${l.place_id}')">Copy Prompt</button>
+          </div>
+          <div class="prompt-box" id="prompt-${l.place_id}">${escapeHtml(prompt)}</div>
+        </div>
+
+        <!-- Section 3: Editable Email Draft -->
+        <div class="queue-card__section">
+          <div class="queue-card__section-label">3. Personalized Email Draft (Insert Mockup Link at [MOCKUP_LINK])</div>
+          <input type="text" id="subject-${l.place_id}" value="${escapeHtml(subject)}" placeholder="Subject Line" style="width:100%; margin-bottom:8px; font-weight:600;">
+          <textarea id="body-${l.place_id}" rows="6" style="width:100%;">${escapeHtml(body)}</textarea>
+        </div>
+
+        <!-- Card Actions -->
+        <div class="queue-card__actions">
+          <a href="${mailtoUrl}" target="_blank" class="btn" onclick="updateMailtoLink('${l.place_id}')" id="mailto-${l.place_id}">
+            ✉️ Open in Email Client
+          </a>
+          <button class="btn btn--outline" onclick="markAsSent('${l.place_id}')">
+            ✓ Mark as Sent
+          </button>
+          ${l.email ? `<button class="btn btn--outline btn--sm" style="margin-left:auto;" onclick="sendSingleEmailAPI('${l.place_id}')">Dispatch via API</button>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+
+// ── Lead Actions ────────────────────────────────────────────────────────
+async function buildOutreachKit(placeId) {
+  showToast('Building outreach kit with Gemini...', 'info');
+  try {
+    const res = await fetch(`/api/leads/${placeId}/build-kit`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to generate outreach kit');
+    const updated = await res.json();
+    
+    // Update local state
+    const idx = state.leads.findIndex(l => l.place_id === placeId);
+    if (idx !== -1) {
+      state.leads[idx] = updated;
     }
-  }
-
-  async function updateStatus(status) {
-    if (!currentModalPlaceId) return;
-
-    // Disable buttons while processing
-    const buttons = approvalModal.querySelectorAll('.btn');
-    buttons.forEach(b => b.disabled = true);
-
-    try {
-      await fetch(`/api/leads/${currentModalPlaceId}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-
-      closeModal();
-      
-      addEvent('done', '✓', 'Status updated',
-        `Lead marked as ${status}`, '');
-        
-      loadLeads();
-
-    } catch (e) {
-      console.error('Update failed:', e);
-    } finally {
-      buttons.forEach(b => b.disabled = false);
+    
+    renderLeads();
+    switchTab('queue');
+    showToast('Outreach kit generated successfully!', 'success');
+    
+    const cardEl = document.getElementById(`card-${placeId}`);
+    if (cardEl) {
+      cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
   }
+}
 
-  // Modal event listeners
-  $('#modalClose').addEventListener('click', closeModal);
-  approvalModal.addEventListener('click', (e) => {
-    if (e.target === approvalModal) closeModal();
+
+function copyPrompt(placeId) {
+  const promptEl = document.getElementById(`prompt-${placeId}`);
+  if (!promptEl) return;
+  const text = promptEl.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Lovable prompt copied to clipboard!', 'success');
+  }).catch(err => {
+    showToast('Copy failed: ' + err.message, 'error');
   });
-  
-  $('#btnCopy').addEventListener('click', copyPitch);
-  $('#btnContacted').addEventListener('click', () => updateStatus('sent'));
-  $('#btnReject').addEventListener('click', () => updateStatus('rejected'));
+}
 
-  // ── WebSocket ──────────────────────────────────────────────
 
-  function connectWS(runId) {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${location.host}/ws/${runId}`);
+function updateMailtoLink(placeId) {
+  const emailObj = state.leads.find(l => l.place_id === placeId);
+  const email = emailObj ? emailObj.email || '' : '';
+  const subjEl = document.getElementById(`subject-${placeId}`);
+  const bodyEl = document.getElementById(`body-${placeId}`);
 
-    ws.onmessage = (evt) => {
-      const event = JSON.parse(evt.data);
-      handleEvent(event);
-    };
+  const subj = subjEl ? subjEl.value : '';
+  const body = bodyEl ? bodyEl.value : '';
 
-    ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-    };
+  const linkEl = document.getElementById(`mailto-${placeId}`);
+  if (linkEl) {
+    linkEl.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
   }
+}
 
-  function handleEvent(event) {
-    switch (event.type) {
 
-      case 'status':
-        progressStatus.textContent = event.message;
-        break;
+async function markAsSent(placeId) {
+  const subjEl = document.getElementById(`subject-${placeId}`);
+  const bodyEl = document.getElementById(`body-${placeId}`);
 
-      case 'search_start':
-        progressStatus.textContent = event.message;
-        addEvent('done', '🚀', `CAMPAIGN STARTED: ${esc(event.query)} in ${esc(event.location)}`,
-          `<b style="color:var(--accent); font-size:1.05rem;">📍 Niches: ${esc(event.query.toUpperCase())} — 🏙️ Area: ${esc(event.location.toUpperCase())}</b>`);
-        break;
+  const payload = {
+    status: 'sent',
+    pitch_subject: subjEl ? subjEl.value : undefined,
+    pitch_body: bodyEl ? bodyEl.value : undefined,
+  };
 
-      case 'search_progress': {
-        // One live line while the area is mapped, instead of an event per tile
-        progressStatus.textContent = event.message;
-        let line = $('#searchProgressLine');
-        if (!line) {
-          line = addEvent('processing', '🗺️', 'Mapping search area', '');
-          line.id = 'searchProgressLine';
-        }
-        line.querySelector('.event-item__detail').textContent = event.message;
-        break;
-      }
-
-      case 'search_complete':
-        updateStats({ found: event.count, qualified: 0, emails_found: 0, approved: 0, sent: 0 });
-        progressStatus.textContent = `Found ${event.count} businesses. Processing...`;
-        addEvent('processing', '🔍', `${event.count} businesses found`,
-          'Starting enrichment pipeline');
-        break;
-
-      case 'processing':
-        progressBar.style.width = `${(event.index / event.total) * 100}%`;
-        progressStatus.textContent = `Processing ${event.index}/${event.total}: ${event.name}`;
-        addEvent('processing', '⏳', `<b style="color:#fff;">${esc(event.name)}</b>`,
-          `📍 ${esc(event.address || 'Checking details')} — Enriching... (${event.index}/${event.total})`);
-        break;
-
-      case 'skipped': {
-        let reason = event.message || '';
-        if (!reason) {
-          reason = event.reason === 'good_website'
-            ? `Good website — not a prospect`
-            : `Score ${event.lead_score} below threshold`;
-        }
-        addEvent('skipped', '⏭', esc(event.name), `<span style="color:#f59e0b;">${esc(reason)}</span>`);
-        // Refresh table
-        loadLeads();
-        break;
-      }
-
-      case 'drafted': {
-        const actionHtml = event.has_pitch !== false
-          ? `<button class="btn btn--primary btn--sm" onclick="window.__openModal('${esc(event.place_id)}')">Review</button>`
-          : `<span style="font-size: 12px; color: var(--text-muted);">Data extracted</span>`;
-
-        addEvent('approval', '⚡', esc(event.name),
-          `Score: ${event.lead_score} — ${event.has_pitch !== false ? 'Pitch drafted' : 'Data extracted'}`,
-          actionHtml
-        );
-        // Refresh table
-        loadLeads();
-        break;
-      }
-
-      case 'business_error':
-        addEvent('error', '⚠', esc(event.name || event.place_id),
-          `Error: ${esc(event.error)}`);
-        break;
-
-      case 'complete':
-        progressBar.style.width = '100%';
-        progressStatus.textContent = 'Pipeline complete!';
-        if (event.stats) updateStats(event.stats);
-        addEvent('done', '🎉', 'Run complete',
-          `${event.stats?.qualified || 0} qualified leads, ${event.stats?.emails_found || 0} emails, ${event.stats?.owners_found || 0} owners found, ${event.stats?.places_calls || 0} billed Places calls`);
-        searchBtn.disabled = false;
-        searchBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-          Start Search`;
-        loadLeads();
-        break;
-
-      case 'error':
-        progressStatus.textContent = `Error: ${event.message}`;
-        addEvent('error', '❌', 'Error', esc(event.message));
-        searchBtn.disabled = false;
-        searchBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-          Start Search`;
-        break;
+  try {
+    const res = await fetch(`/api/leads/${placeId}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Failed to mark as sent');
+    
+    // Update local lead state
+    const idx = state.leads.findIndex(l => l.place_id === placeId);
+    if (idx !== -1) {
+      state.leads[idx].send_status = 'sent';
     }
+    renderLeads();
+    showToast('Lead marked as sent!', 'success');
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+
+async function sendSingleEmailAPI(placeId) {
+  const biz = state.leads.find(l => l.place_id === placeId);
+  if (!biz || !biz.email) {
+    showToast('No valid email for lead', 'error');
+    return;
   }
 
-  // ── Suggest Target Handler ─────────────────────────────────
+  const subjectEl = document.getElementById(`subject-${placeId}`);
+  const bodyEl = document.getElementById(`body-${placeId}`);
+  const pitch_subject = subjectEl ? subjectEl.value : biz.pitch_subject;
+  const pitch_body = bodyEl ? bodyEl.value : biz.pitch_body;
+  if ((pitch_body || '').includes('[MOCKUP_LINK]')) {
+    showToast('Replace [MOCKUP_LINK] with the real mockup link first', 'error');
+    return;
+  }
 
-  if (suggestBtn) {
-    suggestBtn.addEventListener('click', async () => {
-      suggestBtn.disabled = true;
-      const originalText = suggestBtn.innerHTML;
-      suggestBtn.innerHTML = '🤔 Thinking...';
-      
-      try {
-        const resp = await fetch('/api/suggest-target');
-        const data = await resp.json();
-        
-        const niches = Array.isArray(data.niches) && data.niches.length ? data.niches.join(', ') : data.query;
-        if (niches && data.location) {
-          $('#query').value = niches;
-          $('#location').value = data.location;
-          showToast(`💡 ${esc(niches)} in ${esc(data.location)}`, "info");
-        } else if (data.error) {
-          console.error('Suggest error:', data.error);
-          showToast('Error: ' + data.error, "error");
-        }
-      } catch (e) {
-        console.error('Failed to fetch suggestion:', e);
-        showToast('Failed to fetch suggestion.', "error");
-      } finally {
-        suggestBtn.disabled = false;
-        suggestBtn.innerHTML = originalText;
-      }
+  if (!confirm(`Send email to ${biz.email} via API now?`)) return;
+
+  try {
+    // Really sends (Resend/SMTP), with suppression + unsubscribe footer server-side.
+    const res = await fetch(`/api/leads/${placeId}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pitch_subject, pitch_body })
     });
-  }
-
-  // ── Logout Handler ─────────────────────────────────────────
-  const logoutBtn = $('#logoutBtn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', async () => {
-      try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-        showToast("🔒 Logged out successfully.", "info");
-        setTimeout(() => window.location.href = '/login', 500);
-      } catch (e) {
-        window.location.href = '/login';
-      }
-    });
-  }
-
-  // ── Email Dispatch & Tracking Logs Loader ──────────────────
-  const emailLogsContent = $('#emailLogsContent');
-  const refreshLogsBtn = $('#refreshLogsBtn');
-
-  async function loadEmailLogs() {
-    if (!emailLogsContent) return;
-    try {
-      const resp = await fetch('/api/email-logs');
-      if (!resp.ok) return;
-      const logs = await resp.json();
-
-      if (!logs || logs.length === 0) {
-        emailLogsContent.innerHTML = `
-          <div class="empty-state" style="padding: 24px 0;">
-            <div class="empty-state__icon" style="font-size: 1.8rem;">📭</div>
-            <div class="empty-state__text">No emails dispatched yet</div>
-          </div>`;
-        return;
-      }
-
-      let html = `
-        <div class="leads-table-wrap">
-          <table class="leads-table">
-            <thead>
-              <tr>
-                <th>Business Name</th>
-                <th>Recipient Email</th>
-                <th>Status</th>
-                <th>Sent / Dispatched At</th>
-                <th>Opens / Tracking</th>
-                <th>Error Message</th>
-              </tr>
-            </thead>
-            <tbody>`;
-
-      logs.forEach(l => {
-        const statusBadge = l.send_status === 'sent'
-          ? `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 8px; border-radius:4px; font-weight:600;">Sent</span>`
-          : l.send_status === 'simulated'
-          ? `<span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:2px 8px; border-radius:4px; font-weight:600;">Simulated</span>`
-          : `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:4px; font-weight:600;">Failed</span>`;
-        
-        const openBadge = l.open_count > 0 
-          ? `<span style="background:rgba(6,182,212,0.15); color:#06b6d4; padding:2px 8px; border-radius:4px; font-weight:600;">👀 Opened (${l.open_count}x)</span>`
-          : `<span style="color:var(--text-muted);">Unopened</span>`;
-
-        const timeStr = l.sent_at ? new Date(l.sent_at).toLocaleString() : 'N/A';
-        const errStr = l.error_message ? `<span style="color:#ef4444; font-size:0.75rem;">${l.error_message}</span>` : '—';
-
-        html += `
-          <tr>
-            <td class="leads-table__name">${l.name || 'Unknown'}</td>
-            <td class="leads-table__email">${l.email || '—'}</td>
-            <td>${statusBadge}</td>
-            <td style="font-size:0.8rem; color:var(--text-muted);">${timeStr}</td>
-            <td>${openBadge}</td>
-            <td>${errStr}</td>
-          </tr>`;
-      });
-
-      html += `
-            </tbody>
-          </table>
-        </div>`;
-
-      emailLogsContent.innerHTML = html;
-      loadSchedulerStatus();
-    } catch (e) {
-      console.error('Error loading email logs:', e);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    biz.send_status = data.send_status;
+    biz.pitch_subject = pitch_subject;
+    biz.pitch_body = pitch_body;
+    renderLeads();
+    if (data.send_status === 'simulated') {
+      showToast('Simulated only: no email provider key is configured', 'info');
+    } else {
+      showToast(`Email sent to ${biz.email}`, 'success');
     }
+  } catch (err) {
+    showToast('Dispatch error: ' + err.message, 'error');
+  }
+}
+
+
+// ── Search & Telemetry Live Progress ────────────────────────────────────
+async function handleSearchSubmit(e) {
+  e.preventDefault();
+  const niches = queryInput.value.split(',').map(n => n.trim()).filter(Boolean);
+  const location = locationInput.value.trim();
+  const radius = parseInt(radiusInput.value) || 5000;
+  const areaModeEl = document.getElementById('areaMode');
+  const area_mode = areaModeEl ? areaModeEl.value : 'auto';
+
+  if (!niches.length || !location) {
+    showToast('Niches and Location are required', 'error');
+    return;
   }
 
-  async function loadSchedulerStatus() {
-    try {
-      const resp = await fetch('/api/scheduler/status');
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const countEl = $('#schedCount');
-      const timeEl = $('#schedNextTime');
-      const sentEl = $('#schedSentToday');
-      if (countEl) countEl.textContent = data.scheduled_count;
-      if (timeEl) timeEl.textContent = data.next_send_time;
-      if (sentEl) sentEl.textContent = data.daily_sent_total;
-    } catch (e) {}
-  }
+  searchBtn.disabled = true;
+  searchBtn.textContent = 'Searching...';
+  progressSection.classList.remove('hidden');
+  eventFeed.innerHTML = '';
+  if (progressBar) progressBar.style.width = '5%';
+  progressStatus.textContent = 'Starting discovery pipeline...';
 
-  if (refreshLogsBtn) {
-    refreshLogsBtn.addEventListener('click', () => {
-      showToast("🔄 Refreshing email logs...", "info", 2000);
-      loadEmailLogs();
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ niches, location, radius, area_mode })
     });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    state.activeRunId = data.run_id;
+    connectWebSocket(data.run_id);
+  } catch (err) {
+    showToast('Search failed: ' + err.message, 'error');
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Discover Leads';
   }
+}
 
-  const retryFailedBtn = $('#retryFailedBtn');
-  if (retryFailedBtn) {
-    retryFailedBtn.addEventListener('click', async () => {
-      try {
-        const resp = await fetch('/api/email-logs/retry-failed', { method: 'POST' });
-        const data = await resp.json();
-        showToast(`⚡ Re-queued ${data.requeued_count || 0} failed leads into dispatch queue!`, "success");
-        loadEmailLogs();
-        loadSchedulerStatus();
-      } catch (e) {
-        showToast("Error re-queueing failed leads.", "error");
-      }
-    });
-  }
 
-  const clearLogsBtn = $('#clearLogsBtn');
-  if (clearLogsBtn) {
-    let clearConfirm = false;
-    let clearTimer = null;
-    clearLogsBtn.addEventListener('click', async () => {
-      if (!clearConfirm) {
-        clearConfirm = true;
-        clearLogsBtn.textContent = '⚠️ Click again to confirm clear';
-        clearLogsBtn.style.background = '#ef4444';
-        clearLogsBtn.style.color = '#fff';
-        clearTimer = setTimeout(() => {
-          clearConfirm = false;
-          clearLogsBtn.textContent = '🗑️ Clear Logs';
-          clearLogsBtn.style.background = 'rgba(239, 68, 68, 0.15)';
-          clearLogsBtn.style.color = '#ef4444';
-        }, 4000);
-        return;
-      }
-      clearTimeout(clearTimer);
-      clearConfirm = false;
-      clearLogsBtn.textContent = '🗑️ Clear Logs';
-      clearLogsBtn.style.background = 'rgba(239, 68, 68, 0.15)';
-      clearLogsBtn.style.color = '#ef4444';
-      
-      try {
-        const resp = await fetch('/api/email-logs/clear', { method: 'POST' });
-        const data = await resp.json();
-        showToast(`🗑️ Cleared ${data.cleared_count || 0} log entries.`, "info");
-        loadEmailLogs();
-      } catch (e) {
-        showToast("Error clearing logs.", "error");
-      }
-    });
-  }
+function connectWebSocket(runId) {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/ws/${runId}`;
+  state.ws = new WebSocket(wsUrl);
 
-  // ── Search form ────────────────────────────────────────────
+  state.ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    handleWebSocketEvent(data);
+  };
 
-  searchForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
+  state.ws.onerror = () => {
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Discover Leads';
+  };
+}
 
-    const niches = $('#query').value.split(',').map(n => n.trim()).filter(Boolean);
-    const location = $('#location').value.trim();
-    const radius = parseInt($('#radius').value) || 5000;
 
-    if (!niches.length || !location) return;
+function handleWebSocketEvent(data) {
+  const now = new Date();
+  const timeStr = now.toTimeString().split(' ')[0]; // HH:MM:SS
+  const eventType = data.type;
 
-    // Disable button
-    searchBtn.disabled = true;
-    searchBtn.innerHTML = `<span class="spinner"></span> Searching...`;
+  let lineText = '';
+  let colorStyle = 'color: var(--text-ink);';
 
-    // Show progress section
-    progressSection.classList.remove('hidden');
-    progressBar.style.width = '0%';
-    eventFeed.innerHTML = '';
-
-    // Reset stats
-    $('#statFound').textContent = '0';
-    $('#statQualified').textContent = '0';
-    $('#statEmails').textContent = '0';
-    $('#statApproved').textContent = '0';
-    $('#statSent').textContent = '0';
-    $('#statSkipped').textContent = '0';
-
-    try {
-      const resp = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ niches, location, radius }),
-      });
-      const data = resp.ok ? await resp.json() : { error: await resp.text() };
-
-      if (data.error) {
-        progressStatus.textContent = `Error: ${data.error}`;
-        searchBtn.disabled = false;
-        searchBtn.textContent = 'Start Search';
-        return;
-      }
-
-      currentRunId = data.run_id;
-      connectWS(currentRunId);
-      progressStatus.textContent = 'Connected. Waiting for results...';
-
-    } catch (err) {
-      progressStatus.textContent = `Connection error: ${err.message}`;
-      searchBtn.disabled = false;
-      searchBtn.textContent = 'Start Search';
+  if (eventType === 'search_start') {
+    lineText = `${timeStr} — searching "${data.query || 'businesses'}" in ${data.location || 'target area'}...`;
+    progressStatus.textContent = lineText;
+    if (progressBar) progressBar.style.width = '10%';
+  } else if (eventType === 'search_progress') {
+    // One live line while the area is downloaded / matched, instead of a line per update
+    progressStatus.textContent = `${timeStr} — ${data.message}`;
+    let line = document.getElementById('searchProgressLine');
+    if (!line) {
+      line = document.createElement('div');
+      line.id = 'searchProgressLine';
+      line.style.cssText = 'padding: 4px 0; border-bottom: 1px solid var(--border-hairline); color: var(--text-muted);';
+      eventFeed.appendChild(line);
     }
-  });
+    line.textContent = `${timeStr} — ${data.message}`;
+  } else if (eventType === 'status') {
+    lineText = `${timeStr} — ${data.message}`;
+    progressStatus.textContent = lineText;
+  } else if (eventType === 'search_complete') {
+    lineText = `${timeStr} — found ${data.count} businesses`;
+    progressStatus.textContent = lineText;
+    if (progressBar) progressBar.style.width = '25%';
+  } else if (eventType === 'skipped') {
+    lineText = `${timeStr} — skipped ${data.name || 'business'}: ${data.reason || 'duplicate'}`;
+    colorStyle = 'color: var(--stamp-amber);';
+  } else if (eventType === 'processing') {
+    const pct = data.total ? Math.round((data.index / data.total) * 75) + 20 : 50;
+    if (progressBar) progressBar.style.width = `${pct}%`;
+    lineText = `${timeStr} — processing ${data.index}/${data.total}: ${data.name}`;
+    progressStatus.textContent = lineText;
+  } else if (eventType === 'drafted') {
+    lineText = `${timeStr} — enriched ${data.name} (score: ${data.lead_score || 0})`;
+    colorStyle = 'color: var(--accent-teal);';
+  } else if (eventType === 'business_error') {
+    lineText = `${timeStr} — error processing ${data.name}: ${data.error}`;
+    colorStyle = 'color: var(--stamp-rust);';
+  } else if (eventType === 'complete') {
+    const stats = data.stats || {};
+    lineText = `${timeStr} — run complete (${stats.qualified || 0} qualified, ${stats.emails_found || 0} emails, ${stats.owners_found || 0} owners found)`;
+    colorStyle = 'color: var(--stamp-green); font-weight: 600;';
+    progressStatus.textContent = lineText;
+    if (progressBar) progressBar.style.width = '100%';
 
-  // ── Keyboard shortcuts ─────────────────────────────────────
-  document.addEventListener('keydown', (e) => {
-    if (!approvalModal.classList.contains('active')) return;
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Discover Leads';
+    
+    // Immediately fetch updated leads backlog into tabs
+    fetchLeads();
+  } else if (eventType === 'error') {
+    lineText = `${timeStr} — error: ${data.message}`;
+    colorStyle = 'color: var(--stamp-rust); font-weight: 600;';
+    progressStatus.textContent = lineText;
+    searchBtn.disabled = false;
+    searchBtn.textContent = 'Discover Leads';
+  } else {
+    lineText = `${timeStr} — ${data.message || eventType}`;
+  }
 
-    if (e.key === 'Escape') closeModal();
-  });
+  if (lineText) {
+    const div = document.createElement('div');
+    div.style.cssText = `padding: 4px 0; border-bottom: 1px solid var(--border-hairline); ${colorStyle}`;
+    div.textContent = lineText;
+    eventFeed.appendChild(div);
+    eventFeed.scrollTop = eventFeed.scrollHeight;
+  }
+}
 
-  // ── Init: load existing leads & logs ───────────────────────
-  loadLeads();
-  loadEmailLogs();
-  setInterval(loadEmailLogs, 30000);
 
-})();
+async function handleSuggestTarget() {
+  suggestBtn.disabled = true;
+  suggestBtn.textContent = 'Thinking...';
+  try {
+    const res = await fetch('/api/suggest-target');
+    const data = await res.json();
+    const niches = Array.isArray(data.niches) && data.niches.length ? data.niches.join(', ') : data.query;
+    if (niches && data.location) {
+      queryInput.value = niches;
+      locationInput.value = data.location;
+      showToast(`Suggested: ${niches} in ${data.location}`, 'info');
+    }
+  } catch (err) {
+    showToast('Failed to get suggestion', 'error');
+  } finally {
+    suggestBtn.disabled = false;
+    suggestBtn.textContent = 'Suggest Niches + City';
+  }
+}
+
+
+function handleExportCSV() {
+  window.location.href = '/api/export';
+}
+
+
+function handleLogout() {
+  document.cookie = 'admin_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+  window.location.href = '/login';
+}
+
+
+// ── Utilities ───────────────────────────────────────────────────────────
+function showToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  if (type === 'error') toast.style.borderLeft = '4px solid var(--stamp-rust)';
+  if (type === 'success') toast.style.borderLeft = '4px solid var(--accent-teal)';
+
+  toastContainer.appendChild(toast);
+  setTimeout(() => {
+    toast.remove();
+  }, 4000);
+}
+
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}

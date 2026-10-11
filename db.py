@@ -4,11 +4,15 @@ needed for a starter repo. Powered by modern PostgreSQL.
 
 Also stores search run history so every query is browsable later.
 """
+import logging
 from contextlib import contextmanager
+
 import psycopg
 from psycopg.rows import dict_row
 
 from config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_BUSINESSES = """
 CREATE TABLE IF NOT EXISTS businesses (
@@ -31,6 +35,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     lead_score INTEGER,
     score_breakdown TEXT,
     analysis TEXT,
+    mockup_prompt TEXT,
     pitch_subject TEXT,
     pitch_body TEXT,
     approval_status TEXT DEFAULT 'pending',
@@ -113,6 +118,8 @@ _MIGRATION_COLUMNS = [
     ("contact_sources", "TEXT"),
     ("lead_score", "INTEGER"),
     ("score_breakdown", "TEXT"),
+    ("analysis", "TEXT"),
+    ("mockup_prompt", "TEXT"),
     ("website", "TEXT"),
     ("email_language", "TEXT"),
     ("email_verified", "BOOLEAN"),
@@ -154,9 +161,15 @@ def _migrate(conn: psycopg.Connection) -> None:
     existing = {row["column_name"].lower() for row in cursor.fetchall()}
     for col_name, col_type in _MIGRATION_COLUMNS:
         if col_name.lower() not in existing:
-            conn.execute(
-                f"ALTER TABLE businesses ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
-            )
+            try:
+                # Savepoint: on Postgres a failed statement aborts the whole
+                # transaction, so a bare try/except would break every later query.
+                with conn.transaction():
+                    conn.execute(
+                        f"ALTER TABLE businesses ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                    )
+            except Exception as e:
+                logger.warning(f"Auto-migration warning adding column {col_name}: {e}")
 
     cursor_runs = conn.execute(
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'search_runs'"
@@ -175,6 +188,8 @@ def init_db() -> None:
         conn.execute(SCHEMA_PLACES_QUOTA)
         _migrate(conn)
         conn.execute("DELETE FROM search_runs WHERE ip_address = 'auto_pilot_daemon'")
+        conn.execute("UPDATE search_runs SET status = 'complete' WHERE status = 'running'")
+        conn.execute("UPDATE businesses SET send_status = 'not_sent' WHERE send_status = 'skipped_duplicate'")
         # A lead left in 'sending' means the process died mid-send. We can't tell
         # whether the provider accepted it, so never re-send automatically.
         conn.execute(
@@ -241,7 +256,7 @@ _ALL_FIELDS = [
     "place_id", "name", "address", "phone", "category", "website", "email",
     "email_source", "rating", "review_count", "website_quality",
     "website_notes", "facebook_url", "instagram_url", "owner_name",
-    "contact_sources", "lead_score", "score_breakdown", "analysis",
+    "contact_sources", "lead_score", "score_breakdown", "analysis", "mockup_prompt",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
     "latitude", "longitude", "timezone",
@@ -472,24 +487,20 @@ def get_processed_place_ids() -> set[str]:
 
 
 def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
-    """Check if a business has already been processed or contacted (100% solid deduplication)."""
+    """Check if a business has already been contacted or unsubscribed (solid deduplication)."""
     with get_conn() as conn:
         # 1. Check by place_id
         if place_id:
             row = conn.execute(
-                "SELECT send_status, approval_status, lead_score FROM businesses WHERE place_id = %s",
+                "SELECT send_status FROM businesses WHERE place_id = %s",
                 (place_id,),
             ).fetchone()
-            if row and (
-                row["send_status"] in ("sent", "pending_auto_send", "queued")
-                or row["approval_status"] in ("approved", "rejected")
-                or row["lead_score"] is not None
-            ):
+            if row and row["send_status"] in ("sent", "unsubscribed"):
                 return True
-        # 2. Check by exact name if already queued or emailed
+        # 2. Check by exact name if already sent or unsubscribed
         if name and name.strip():
             row = conn.execute(
-                "SELECT send_status FROM businesses WHERE LOWER(name) = LOWER(%s) AND (send_status IN ('sent', 'pending_auto_send', 'queued') OR lead_score IS NOT NULL)",
+                "SELECT send_status FROM businesses WHERE LOWER(name) = LOWER(%s) AND send_status IN ('sent', 'unsubscribed')",
                 (name.strip(),),
             ).fetchone()
             if row:
@@ -497,7 +508,7 @@ def is_business_already_processed(place_id: str, name: str = "", email: str = ""
         # 3. Check by email if present
         if email and "@" in email:
             row = conn.execute(
-                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) AND send_status IN ('sent', 'pending_auto_send', 'queued')",
+                "SELECT send_status FROM businesses WHERE LOWER(email) = LOWER(%s) AND send_status IN ('sent', 'unsubscribed')",
                 (email.strip(),),
             ).fetchone()
             if row:
