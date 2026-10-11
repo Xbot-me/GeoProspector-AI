@@ -177,8 +177,10 @@ function formatRunDate(dStr) {
         ? `★ ${l.rating} <span style="color:var(--text-muted); font-size:0.75rem;">(${l.review_count || 0})</span>`
         : '<span style="color:var(--text-muted)">—</span>';
 
+      const ownerLink = l.owner_linkedin && /^https?:\/\//i.test(l.owner_linkedin)
+        ? ` <a href="${esc(l.owner_linkedin)}" target="_blank" rel="noopener" class="social-link">in</a>` : '';
       const ownerStr = l.owner_name
-        ? `<span style="color:var(--text-primary)">👤 ${esc(l.owner_name)}</span>`
+        ? `<span style="color:var(--text-primary)">👤 ${esc(l.owner_name)}</span>${l.owner_role ? ` <span style="color:var(--text-muted)">${esc(l.owner_role)}</span>` : ''}${ownerLink}`
         : '<span style="color:var(--text-muted)">—</span>';
 
       return `
@@ -244,9 +246,9 @@ function formatRunDate(dStr) {
   }
 
   function esc(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (str === null || str === undefined) return '';
+    // Also escapes quotes: values are used inside href="..." attributes too
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 })();

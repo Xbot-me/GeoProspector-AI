@@ -35,20 +35,19 @@ from db import (
     upsert_business, record_email_open, get_pending_auto_send_leads,
     get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
     unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
-    claim_lead_for_sending, is_email_already_contacted,
+    claim_lead_for_sending, get_processed_place_ids, is_email_already_contacted,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
 from graph import build_graph, get_checkpointer_cm
-from nodes.places_search import search_businesses
+from nodes.places_search import SearchError, search_area
+from suggestions import split_niches, suggest_bundle
 from quota import QuotaExceededError
 from config import (
-    MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL, ADMIN_USERNAME, ADMIN_PASSWORD,
+    MIN_LEAD_SCORE, ADMIN_USERNAME, ADMIN_PASSWORD,
     AUTO_SEND_EMAILS, MAX_DAILY_EMAILS,
 )
 
-from google import genai
-_gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +354,15 @@ async def get_run_leads(run_id: str, request: Request):
     return [{k: lead.get(k) for k in _PUBLIC_LEAD_FIELDS} for lead in leads]
 
 
+_CSV_FIELDS = [
+    "name", "lead_score", "website_quality", "website", "email", "email_source",
+    "owner_name", "owner_role", "owner_linkedin", "company_linkedin",
+    "phone", "international_phone", "facebook_url", "instagram_url",
+    "rating", "review_count", "category", "niches", "address",
+    "pitch_subject", "pitch_body",
+]
+
+
 @app.get("/api/runs/{run_id}/csv")
 async def export_run_csv(run_id: str):
     """Export a run's leads to CSV."""
@@ -368,15 +376,7 @@ async def export_run_csv(run_id: str):
 
     # Build CSV in memory
     output = io.StringIO()
-    # Define columns we care about
-    fieldnames = [
-        "name", "lead_score", "website_quality", "email", 
-        "phone", "facebook_url", "instagram_url", "owner_name", 
-        "rating", "review_count", "category", "address", 
-        "pitch_subject", "pitch_body"
-    ]
-    
-    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+    writer = csv.DictWriter(output, fieldnames=_CSV_FIELDS, extrasaction='ignore')
     writer.writeheader()
     for lead in leads:
         writer.writerow(lead)
@@ -394,42 +394,8 @@ async def export_run_csv(run_id: str):
 
 @app.get("/api/suggest-target")
 async def suggest_target():
-    """Use Gemini or target rotation engine to suggest a fresh, non-repetitive niche and location."""
-    # 1. Query DB for executed search runs
-    try:
-        with get_conn() as conn:
-            rows = conn.execute("SELECT query, location FROM search_runs").fetchall()
-            executed = {(r["query"].lower().strip(), r["location"].lower().strip()) for r in rows}
-    except Exception:
-        executed = set()
-
-    # 2. If Gemini is available, pass recently executed queries to ensure Gemini gives a NEW idea
-    if _gemini_client:
-        recent_list = list(executed)[-10:] if executed else []
-        prompt = (
-            "I run a web design agency building sites for local business owners. "
-            "Suggest ONE high-ticket, low-tech local niche ($2k+ per customer value, e.g. Roofers, Solar, Tree Removal, Paving, Plumbing, Electricians, Medi-Spas) "
-            "and ONE growing city in US, UK, Canada, or Australia. "
-            f"CRITICAL: Do NOT suggest any of these already searched targets: {json.dumps(recent_list)}. "
-            "Format output as raw JSON with no markdown:\n"
-            '{"query": "Solar Installers", "location": "Austin, Texas, USA"}'
-        )
-        try:
-            resp = _gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-            text = resp.text.strip()
-            if text.startswith("```json"): text = text[7:]
-            if text.startswith("```"): text = text[3:]
-            if text.endswith("```"): text = text[:-3]
-            data = json.loads(text.strip())
-            key = (data.get("query", "").lower().strip(), data.get("location", "").lower().strip())
-            if key not in executed and data.get("query") and data.get("location"):
-                return data
-        except Exception as e:
-            logger.warning(f"Gemini target suggestion fallback: {e}")
-
-    # 3. Catalog fallback: return next unexecuted target from smart rotation
-    target = get_next_campaign_target()
-    return {"query": target["query"], "location": target["location"]}
+    """A fresh bundle of related niches + one city, never one already searched or just suggested."""
+    return await asyncio.to_thread(suggest_bundle)
 
 
 def _write_run_csv_to_disk(run_id: str):
@@ -445,15 +411,8 @@ def _write_run_csv_to_disk(run_id: str):
         
     filepath = data_dir / f"run_{run_id}.csv"
     
-    fieldnames = [
-        "name", "lead_score", "website_quality", "email", 
-        "phone", "facebook_url", "instagram_url", "owner_name", 
-        "rating", "review_count", "category", "address", 
-        "pitch_subject", "pitch_body"
-    ]
-    
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+        writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS, extrasaction='ignore')
         writer.writeheader()
         for lead in leads:
             writer.writerow(lead)
@@ -462,16 +421,52 @@ def _write_run_csv_to_disk(run_id: str):
 
 
 
+def _parse_niches(payload: dict) -> list[str]:
+    raw = payload.get("niches")
+    if isinstance(raw, list):
+        niches = [str(n).strip() for n in raw if str(n).strip()]
+    else:
+        niches = split_niches(payload.get("query", ""))
+    unique: dict[str, str] = {}
+    for n in niches:
+        unique.setdefault(n.lower(), n)
+    return list(unique.values())[:10]
+
+
+def _start_run(niches: list[str], location: str, radius: int, ip_address: str) -> str:
+    run_id = uuid.uuid4().hex[:12]
+    save_search_run(run_id, ", ".join(niches), location, radius, 0, ip_address=ip_address)
+    _runs[run_id] = {
+        "status": "starting",
+        "events": [],
+        "stats": {
+            "found": 0, "good_website": 0, "low_score": 0,
+            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
+            "owners_found": 0, "places_calls": 0,
+        },
+    }
+    _ws_clients.setdefault(run_id, [])
+    # Run pipeline in background thread (LangGraph + requests are sync)
+    Thread(target=_run_pipeline_thread, args=(run_id, niches, location, radius), daemon=True).start()
+    return run_id
+
+
 @app.post("/api/search")
 async def start_search(payload: dict, request: Request):
-    """Start a pipeline run in the background."""
-    query = payload.get("query", "").strip()
-    location = payload.get("location", "").strip()
-    radius = int(payload.get("radius", 5000))
-    max_results = int(payload.get("max_results", 15))
+    """Start a pipeline run in the background.
 
-    if not query or not location:
-        return {"error": "query and location are required"}
+    Body: {"niches": ["Roofers", "HVAC"], "location": "...", "radius": 5000}
+    ("query": "Roofers, HVAC" is accepted too). Every matching business in the
+    radius is found; there is no per-run result cap."""
+    niches = _parse_niches(payload)
+    location = (payload.get("location") or "").strip()
+    try:
+        radius = max(100, min(int(payload.get("radius") or 5000), 50_000))
+    except (TypeError, ValueError):
+        return Response(status_code=400, content="radius must be a number of meters")
+
+    if not niches or not location:
+        return Response(status_code=400, content="niches and location are required")
 
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
@@ -479,30 +474,7 @@ async def start_search(payload: dict, request: Request):
     else:
         ip_address = request.client.host if request.client else "unknown"
 
-    run_id = uuid.uuid4().hex[:12]
-
-    # Persist the search run to DB immediately
-    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
-
-    _runs[run_id] = {
-        "status": "starting",
-        "events": [],
-        "stats": {
-            "found": 0, "good_website": 0, "low_score": 0,
-            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
-        },
-    }
-    _ws_clients.setdefault(run_id, [])
-
-    # Run pipeline in background thread (LangGraph + requests are sync)
-    thread = Thread(
-        target=_run_pipeline_thread,
-        args=(run_id, query, location, radius, max_results),
-        daemon=True,
-    )
-    thread.start()
-
-    return {"run_id": run_id}
+    return {"run_id": _start_run(niches, location, radius, ip_address)}
 
 
 @app.get("/api/track/open/{place_id}.png")
@@ -517,30 +489,7 @@ async def track_email_open(place_id: str):
 def trigger_auto_pilot_search_run(ip_address: str = "auto_pilot") -> tuple[str, dict]:
     """Select next campaign target from rotation and launch search run pipeline in background."""
     target = get_next_campaign_target()
-    query = target["query"]
-    location = target["location"]
-    radius = 15000
-    max_results = 20
-
-    run_id = uuid.uuid4().hex[:12]
-    save_search_run(run_id, query, location, radius, max_results, ip_address=ip_address)
-
-    _runs[run_id] = {
-        "status": "starting",
-        "events": [],
-        "stats": {
-            "found": 0, "good_website": 0, "low_score": 0,
-            "qualified": 0, "emails_found": 0, "approved": 0, "sent": 0,
-        },
-    }
-    _ws_clients.setdefault(run_id, [])
-
-    thread = Thread(
-        target=_run_pipeline_thread,
-        args=(run_id, query, location, radius, max_results),
-        daemon=True,
-    )
-    thread.start()
+    run_id = _start_run([target["query"]], target["location"], 15000, ip_address)
     return run_id, target
 
 
@@ -643,40 +592,49 @@ def _broadcast(run_id: str, event: dict):
             clients.remove(ws)
 
 
-def _run_pipeline_thread(run_id: str, query: str, location: str,
-                         radius: int, max_results: int):
+def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: int):
     """Main pipeline execution — runs in a background thread."""
     run = _runs[run_id]
+    label = ", ".join(niches)
 
-    # Step 1: Search Places API
+    # Step 1: Find every matching business in the radius
     _broadcast(run_id, {
         "type": "search_start",
-        "query": query,
+        "query": label,
         "location": location,
-        "message": f"🎯 LAUNCHED CAMPAIGN: {query.upper()} in {location.upper()}"
+        "message": f"🎯 LAUNCHED CAMPAIGN: {label.upper()} in {location.upper()} ({radius / 1000:g} km)"
     })
-    _broadcast(run_id, {"type": "status", "message": f"Searching Google Maps for {query} in {location}..."})
+    _broadcast(run_id, {"type": "status", "message": f"Mapping {location} ({radius / 1000:g} km radius) for {label}..."})
 
     try:
-        businesses = search_businesses(
-            query=query, location=location,
-            radius_meters=radius, max_results=max_results,
+        businesses, search_stats = search_area(
+            niches, location, radius,
+            known_place_ids=get_processed_place_ids(),
+            progress=lambda event: _broadcast(run_id, event),
         )
-    except QuotaExceededError as e:
-        _broadcast(run_id, {"type": "error", "message": str(e)})
-        run["status"] = "error"
-        update_search_run(run_id, 0, "error")
-        return
     except Exception as e:
+        if not isinstance(e, (SearchError, RuntimeError)):
+            logger.exception("Search failed")
         _broadcast(run_id, {"type": "error", "message": f"Search failed: {e}"})
         run["status"] = "error"
         update_search_run(run_id, 0, "error")
         return
 
-    # Filter out 100% solid duplicate businesses before processing
+    run["stats"]["places_calls"] = search_stats["billed_calls"]
+    summary = (
+        f"Coverage done: {len(businesses)} new businesses, {search_stats['tiles_searched']} tiles mapped, "
+        f"{search_stats['billed_calls']} billed Places calls"
+    )
+    if search_stats["dense_tiles"]:
+        summary += f" ({search_stats['dense_tiles']} very dense tiles may be incomplete)"
+    _broadcast(run_id, {"type": "status", "message": summary})
+    if search_stats["stopped"]:
+        _broadcast(run_id, {"type": "error", "message": f"Search stopped early, processing what was found: {search_stats['stopped']}"})
+
+    # Businesses already in the CRM under this place_id (duplicate emails are checked after enrichment)
     new_businesses = []
     for b in businesses:
-        if is_business_already_processed(b["place_id"], b.get("name", "")):
+        if is_business_already_processed(b["place_id"]):
             _broadcast(run_id, {
                 "type": "skipped",
                 "name": b.get("name", "Unknown"),
@@ -713,6 +671,8 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
             "latitude": b.get("latitude"),
             "longitude": b.get("longitude"),
             "timezone": b.get("timezone"),
+            "international_phone": b.get("international_phone"),
+            "niches": ", ".join(b.get("niches") or []) or None,
             "approval_status": "pending",
             "send_status": "not_sent",
         })
@@ -770,6 +730,9 @@ def _process_single_business(run_id: str, graph_app, business: dict,
             "error": str(e),
         })
         return
+
+    if result.get("owner_name"):
+        run["stats"]["owners_found"] += 1
 
     # Check early exits
     quality = result.get("website_quality")

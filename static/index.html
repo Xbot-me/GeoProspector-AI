@@ -44,12 +44,12 @@
       <form class="search-form" id="searchForm">
         <div class="form-group">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <label for="query" style="margin-bottom: 0;">Business Type</label>
+            <label for="query" style="margin-bottom: 0;">Niches <span style="font-weight:400; color:var(--text-muted);">(comma-separated)</span></label>
             <button type="button" id="suggestBtn" class="btn" style="background: none; border: none; color: var(--accent-1); font-size: 13px; cursor: pointer; padding: 0;">
-              💡 Suggest Target
+              💡 Suggest Niches + City
             </button>
           </div>
-          <input type="text" id="query" placeholder="e.g. restaurants" required>
+          <input type="text" id="query" placeholder="e.g. Roofers, Gutter Installers, Siding Contractors" required>
         </div>
         <div class="form-group">
           <label for="location">Location</label>
@@ -57,11 +57,7 @@
         </div>
         <div class="form-group">
           <label for="radius">Radius (m)</label>
-          <input type="number" id="radius" value="5000" min="100" max="50000">
-        </div>
-        <div class="form-group">
-          <label for="maxResults">Max</label>
-          <input type="number" id="maxResults" value="15" min="1" max="20">
+          <input type="number" id="radius" value="5000" min="100" max="50000" step="500" title="Every matching business inside this radius is found">
         </div>
         <div style="display: flex; gap: 8px;">
           <button type="button" class="btn btn--skip" id="exportBtn" style="height: 42px;">

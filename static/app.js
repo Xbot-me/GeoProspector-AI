@@ -255,9 +255,10 @@
   }
 
   function esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (str === null || str === undefined) return '';
+    // Also escapes quotes: values are used inside href="..." attributes too
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   // ── Export ─────────────────────────────────────────────────
@@ -266,6 +267,36 @@
   });
 
   // ── Modal ──────────────────────────────────────────────────
+
+  function linkHtml(url, label) {
+    if (!url || !/^https?:\/\//i.test(url)) return '—';
+    return `<a href="${esc(url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(label || url)}</a>`;
+  }
+
+  function ownerHtml(d) {
+    if (!d.owner_name) return '<span style="color:var(--text-muted)">Not identified</span>';
+    const role = d.owner_role ? ` <span style="color:var(--text-muted)">(${esc(d.owner_role)})</span>` : '';
+    const li = d.owner_linkedin ? ` · ${linkHtml(d.owner_linkedin, 'LinkedIn')}` : '';
+    return `👤 ${esc(d.owner_name)}${role}${li}`;
+  }
+
+  function otherContactsHtml(d) {
+    let c;
+    try { c = JSON.parse(d.contacts_json || '{}'); } catch (e) { return '—'; }
+    const lines = [];
+    (c.people || []).filter(p => p.name !== d.owner_name).slice(0, 5).forEach(p => {
+      const bits = [esc(p.name)];
+      if (p.role) bits.push(`<span style="color:var(--text-muted)">${esc(p.role)}</span>`);
+      if (p.email) bits.push(esc(p.email));
+      if (p.linkedin) bits.push(linkHtml(p.linkedin, 'LinkedIn'));
+      lines.push(bits.join(' · '));
+    });
+    const otherEmails = (c.emails || []).map(e => e.value).filter(e => e !== d.email);
+    if (otherEmails.length) lines.push('✉ ' + otherEmails.slice(0, 4).map(esc).join(', '));
+    const phones = (c.phones || []).slice(0, 3);
+    if (phones.length) lines.push('📞 ' + phones.map(esc).join(', '));
+    return lines.length ? lines.join('<br>') : '—';
+  }
 
   window.__openModal = async function(placeId) {
     // If we don't have full details, fetch them
@@ -288,13 +319,16 @@
       ['Email', data.email ? `<span class="leads-table__email">${esc(data.email)}</span>` : '<span style="color:var(--text-muted)">Not found</span>'],
       ['Language', data.email_language ? `<span style="color:#10b981;font-weight:600;">🗣️ ${esc(data.email_language)}</span>` : 'English'],
       ['Tracking', data.open_count > 0 ? `<span style="color:#10b981;font-weight:600;">👀 Opened ${data.open_count} time(s)</span>` : (data.sent_at ? `✉ Sent at ${data.sent_at}` : 'Not dispatched yet')],
-      ['Phone', data.phone || '—'],
+      ['Owner', ownerHtml(data)],
+      ['Phone', esc([data.phone, data.international_phone].filter(Boolean).join(' · ') || '—')],
       ['Rating', data.rating ? `${data.rating}★ (${data.review_count || 0} reviews)` : '—'],
-      ['Category', data.category || '—'],
+      ['Category', esc(data.category || '—')],
       ['Facebook', data.facebook_url ? `<a href="${esc(data.facebook_url)}" target="_blank" style="color:var(--accent)">${esc(data.facebook_url)}</a>` : '—'],
       ['Instagram', data.instagram_url ? `<a href="${esc(data.instagram_url)}" target="_blank" style="color:var(--accent)">${esc(data.instagram_url)}</a>` : '—'],
-      ['Owner', data.owner_name || '—'],
-      ['Address', data.address || '—'],
+      ['Company LinkedIn', linkHtml(data.company_linkedin)],
+      ['Niches', esc(data.niches || '—')],
+      ['Other contacts', otherContactsHtml(data)],
+      ['Address', esc(data.address || '—')],
     ];
 
     modalDetails.innerHTML = details.map(([label, value]) => `
@@ -403,9 +437,21 @@
 
       case 'search_start':
         progressStatus.textContent = event.message;
-        addEvent('done', '🚀', `CAMPAIGN STARTED: ${event.query} in ${event.location}`,
-          `<b style="color:var(--accent); font-size:1.05rem;">📍 Target: ${event.query.toUpperCase()} — 🏙️ City: ${event.location.toUpperCase()}</b>`);
+        addEvent('done', '🚀', `CAMPAIGN STARTED: ${esc(event.query)} in ${esc(event.location)}`,
+          `<b style="color:var(--accent); font-size:1.05rem;">📍 Niches: ${esc(event.query.toUpperCase())} — 🏙️ Area: ${esc(event.location.toUpperCase())}</b>`);
         break;
+
+      case 'search_progress': {
+        // One live line while the area is mapped, instead of an event per tile
+        progressStatus.textContent = event.message;
+        let line = $('#searchProgressLine');
+        if (!line) {
+          line = addEvent('processing', '🗺️', 'Mapping search area', '');
+          line.id = 'searchProgressLine';
+        }
+        line.querySelector('.event-item__detail').textContent = event.message;
+        break;
+      }
 
       case 'search_complete':
         updateStats({ found: event.count, qualified: 0, emails_found: 0, approved: 0, sent: 0 });
@@ -417,8 +463,8 @@
       case 'processing':
         progressBar.style.width = `${(event.index / event.total) * 100}%`;
         progressStatus.textContent = `Processing ${event.index}/${event.total}: ${event.name}`;
-        addEvent('processing', '⏳', `<b style="color:#fff;">${event.name}</b>`,
-          `📍 ${event.address || 'Checking details'} — Enriching... (${event.index}/${event.total})`);
+        addEvent('processing', '⏳', `<b style="color:#fff;">${esc(event.name)}</b>`,
+          `📍 ${esc(event.address || 'Checking details')} — Enriching... (${event.index}/${event.total})`);
         break;
 
       case 'skipped': {
@@ -428,7 +474,7 @@
             ? `Good website — not a prospect`
             : `Score ${event.lead_score} below threshold`;
         }
-        addEvent('skipped', '⏭', event.name, `<span style="color:#f59e0b;">${reason}</span>`);
+        addEvent('skipped', '⏭', esc(event.name), `<span style="color:#f59e0b;">${esc(reason)}</span>`);
         // Refresh table
         loadLeads();
         break;
@@ -439,7 +485,7 @@
           ? `<button class="btn btn--primary btn--sm" onclick="window.__openModal('${esc(event.place_id)}')">Review</button>`
           : `<span style="font-size: 12px; color: var(--text-muted);">Data extracted</span>`;
 
-        addEvent('approval', '⚡', event.name,
+        addEvent('approval', '⚡', esc(event.name),
           `Score: ${event.lead_score} — ${event.has_pitch !== false ? 'Pitch drafted' : 'Data extracted'}`,
           actionHtml
         );
@@ -449,8 +495,8 @@
       }
 
       case 'business_error':
-        addEvent('error', '⚠', event.name || event.place_id,
-          `Error: ${event.error}`);
+        addEvent('error', '⚠', esc(event.name || event.place_id),
+          `Error: ${esc(event.error)}`);
         break;
 
       case 'complete':
@@ -458,7 +504,7 @@
         progressStatus.textContent = 'Pipeline complete!';
         if (event.stats) updateStats(event.stats);
         addEvent('done', '🎉', 'Run complete',
-          `${event.stats?.qualified || 0} qualified leads, ${event.stats?.emails_found || 0} emails found`);
+          `${event.stats?.qualified || 0} qualified leads, ${event.stats?.emails_found || 0} emails, ${event.stats?.owners_found || 0} owners found, ${event.stats?.places_calls || 0} billed Places calls`);
         searchBtn.disabled = false;
         searchBtn.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
@@ -468,7 +514,7 @@
 
       case 'error':
         progressStatus.textContent = `Error: ${event.message}`;
-        addEvent('error', '❌', 'Error', event.message);
+        addEvent('error', '❌', 'Error', esc(event.message));
         searchBtn.disabled = false;
         searchBtn.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
@@ -489,10 +535,11 @@
         const resp = await fetch('/api/suggest-target');
         const data = await resp.json();
         
-        if (data.query && data.location) {
-          $('#query').value = data.query;
+        const niches = Array.isArray(data.niches) && data.niches.length ? data.niches.join(', ') : data.query;
+        if (niches && data.location) {
+          $('#query').value = niches;
           $('#location').value = data.location;
-          showToast(`💡 Suggested: ${data.query} in ${data.location}`, "info");
+          showToast(`💡 ${esc(niches)} in ${esc(data.location)}`, "info");
         } else if (data.error) {
           console.error('Suggest error:', data.error);
           showToast('Error: ' + data.error, "error");
@@ -669,12 +716,11 @@
   searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const query = $('#query').value.trim();
+    const niches = $('#query').value.split(',').map(n => n.trim()).filter(Boolean);
     const location = $('#location').value.trim();
     const radius = parseInt($('#radius').value) || 5000;
-    const maxResults = parseInt($('#maxResults').value) || 15;
 
-    if (!query || !location) return;
+    if (!niches.length || !location) return;
 
     // Disable button
     searchBtn.disabled = true;
@@ -697,9 +743,9 @@
       const resp = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, location, radius, max_results: maxResults }),
+        body: JSON.stringify({ niches, location, radius }),
       });
-      const data = await resp.json();
+      const data = resp.ok ? await resp.json() : { error: await resp.text() };
 
       if (data.error) {
         progressStatus.textContent = `Error: ${data.error}`;
