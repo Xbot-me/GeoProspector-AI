@@ -10,9 +10,9 @@ Whether you run a web design agency, a marketing firm, or a SaaS company, GeoPro
 
 ## 🚀 Key Features
 
-* **Intelligent Google Maps Scraping:** Uses the new Google Places API to find highly targeted local businesses in specific geographic radii.
+* **Full-Radius Search:** Finds every business for several niches at once inside a radius. The area is mapped with Google's free IDs-only search and split where it's dense, so billed calls stay around one per 20 businesses.
 * **Built-in AI Niche Generator:** Don't know who to target? The built-in Gemini AI niche generator brainstorms high-ticket, low-tech industries in booming US cities and auto-fills your search.
-* **Deep Data Enrichment:** Automatically scrapes websites, searches DuckDuckGo, and queries Hunter.io to find owner names, emails, Facebook pages, and Instagram profiles.
+* **Deep Data Enrichment:** Crawls each business site (emails, phones, schema.org, Gemini-read team pages), Hunter.io people search, UK Companies House directors, and public LinkedIn/Facebook/Instagram profile URLs to identify the owner, their role and the best email.
 * **Automated Website Auditing:** Analyzes business websites to detect outdated CMS versions, missing mobile optimization, parked domains, or "social-only" businesses with no real website.
 * **Smart Lead Scoring:** Ranks prospects from 0-100 based on review count, rating, digital presence, and website quality so you can focus on the warmest leads.
 * **AI-Personalized Cold Emails:** Uses Google's Gemini AI to write highly personalized, honest outreach pitches based on the business's actual Google reviews and website status.
@@ -42,7 +42,9 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit your `.env` file and add your `GOOGLE_PLACES_API_KEY` and `GEMINI_API_KEY`.
+Edit your `.env` file and add your `GOOGLE_PLACES_API_KEY` and `GEMINI_API_KEY`. `HUNTER_API_KEY` and `COMPANIES_HOUSE_API_KEY` are optional extra contact sources.
+
+Run the tests with `pip install -r requirements-dev.txt` then `pytest tests`.
 
 Start the server:
 ```bash
@@ -82,7 +84,7 @@ GeoProspector AI isn't just a scraper; it's an intelligent multi-agent pipeline.
 ## 💰 API Costs & Free Tiers
 
 This tool is designed to cost **$0/month** to run:
-- **Google Places API:** You get 5,000 free search calls per month. (Note: A 100-business search costs only 5 API calls due to pagination).
+- **Google Places API:** The fields needed (website, phone, rating) are billed as Text Search Enterprise: 1,000 free calls/month, then about $35 per 1,000 (check your Cloud Console). One billed call returns up to 20 businesses; mapping the search area uses the free IDs-only tier. `MAX_PLACES_CALLS_PER_MONTH` (default 1000) stops runs before you exceed it.
 - **Gemini API:** Uses the Gemini free tier (1,500 requests/day).
 - **DuckDuckGo:** Free web search scraping.
 
