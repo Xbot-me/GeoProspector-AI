@@ -20,8 +20,14 @@ def _provider():
     raise SearchError(f"Unknown PLACES_PROVIDER '{PLACES_PROVIDER}' (use 'overture' or 'google')")
 
 
-def search_area(niches, location, radius_m, known_place_ids=None, progress=None):
-    return _provider().search_area(niches, location, radius_m, known_place_ids=known_place_ids, progress=progress)
+def search_area(niches, location, radius_m, known_place_ids=None, progress=None, area_mode="auto"):
+    """area_mode: auto (widen until enough results), radius (exact circle), city (whole boundary).
+    Only the Overture provider supports widening/city; Google always uses the exact radius."""
+    provider = _provider()
+    if PLACES_PROVIDER == "overture":
+        return provider.search_area(niches, location, radius_m, known_place_ids=known_place_ids,
+                                    progress=progress, area_mode=area_mode)
+    return provider.search_area(niches, location, radius_m, known_place_ids=known_place_ids, progress=progress)
 
 
 def search_businesses(query, location, radius_meters=5000, max_results=None):

@@ -185,7 +185,8 @@ h1, h2, h3, h4, .font-header {
 
 input[type="text"],
 input[type="number"],
-textarea {
+textarea,
+.search-form select {
   font-family: var(--font-body);
   font-size: 13px;
   color: var(--text-ink);
@@ -197,7 +198,7 @@ textarea {
   transition: border-color 0.15s ease;
 }
 
-input:focus, textarea:focus {
+input:focus, textarea:focus, .search-form select:focus {
   border-color: var(--accent-teal);
   background: #FFFFFF;
 }

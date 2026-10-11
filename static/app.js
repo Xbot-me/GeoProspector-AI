@@ -677,6 +677,8 @@ async function handleSearchSubmit(e) {
   const niches = queryInput.value.split(',').map(n => n.trim()).filter(Boolean);
   const location = locationInput.value.trim();
   const radius = parseInt(radiusInput.value) || 5000;
+  const areaModeEl = document.getElementById('areaMode');
+  const area_mode = areaModeEl ? areaModeEl.value : 'auto';
 
   if (!niches.length || !location) {
     showToast('Niches and Location are required', 'error');
@@ -694,7 +696,7 @@ async function handleSearchSubmit(e) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ niches, location, radius })
+      body: JSON.stringify({ niches, location, radius, area_mode })
     });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();

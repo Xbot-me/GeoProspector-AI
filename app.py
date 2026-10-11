@@ -42,6 +42,8 @@ from nodes.area_search import SearchError, search_area
 from suggestions import split_niches, suggest_bundle
 from config import ADMIN_USERNAME, ADMIN_PASSWORD, PLACES_PROVIDER
 
+# Pipeline/search logs (uvicorn only configures its own loggers): visible in Render logs.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── In-memory run tracking ──────────────────────────────────────────────
@@ -300,11 +302,12 @@ def _parse_niches(payload: dict) -> list[str]:
 async def start_search(payload: dict, request: Request):
     """Start a pipeline run in the background.
 
-    Body: {"niches": ["Roofers", "HVAC"], "location": "...", "radius": 5000}
-    ("query": "Roofers, HVAC" is accepted too). Every matching business in the
-    radius is found; there is no per-run result cap."""
+    Body: {"niches": ["Roofers", "HVAC"], "location": "...", "radius": 5000, "area_mode": "auto"}
+    ("query": "Roofers, HVAC" is accepted too). area_mode: "auto" widens the radius until
+    enough businesses are found, "radius" keeps it exact, "city" searches the whole city."""
     niches = _parse_niches(payload)
     location = (payload.get("location") or "").strip()
+    area_mode = payload.get("area_mode") if payload.get("area_mode") in ("auto", "radius", "city") else "auto"
     try:
         radius = max(100, min(int(payload.get("radius") or 5000), 50_000))
     except (TypeError, ValueError):
@@ -332,7 +335,7 @@ async def start_search(payload: dict, request: Request):
     }
     _ws_clients.setdefault(run_id, [])
     # Run pipeline in background thread (LangGraph + requests are sync)
-    Thread(target=_run_pipeline_thread, args=(run_id, niches, location, radius), daemon=True).start()
+    Thread(target=_run_pipeline_thread, args=(run_id, niches, location, radius, area_mode), daemon=True).start()
     return {"run_id": run_id}
 
 
@@ -490,32 +493,37 @@ def _broadcast(run_id: str, event: dict):
             clients.remove(ws)
 
 
-def market_context(niches: list[str], totals: dict, radius_m: int) -> str | None:
+def market_context(niches: list[str], totals: dict, radius_m: int, area_label: str | None = None) -> str | None:
     """Competitor line for the pitch, from the area search's per-niche counts."""
+    where = f"in the {area_label}" if area_label else f"within {radius_m / 1000:g} km"
     for niche in niches:
         t = totals.get(niche)
         if t and t["total"] >= 3:
             # "list": counts come from the places data, not from checking each site
             noun = niche.lower() if niche.lower().endswith("s") else f"{niche.lower()} businesses"
-            return (f"{t['with_website']} of {t['total']} {noun} within "
-                    f"{radius_m / 1000:g} km list a website")
+            return f"{t['with_website']} of {t['total']} {noun} {where} list a website"
     return None
 
 
-def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: int):
+_AREA_LABELS = {"auto": "radius, widened if needed", "radius": "exact radius", "city": "whole city"}
+
+
+def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: int, area_mode: str = "auto"):
     """Main pipeline execution — runs in a background thread."""
     run = _runs[run_id]
     label = ", ".join(niches)
     businesses: list[dict] = []
+    area_text = "whole city" if area_mode == "city" else f"{radius / 1000:g} km ({_AREA_LABELS[area_mode]})"
 
-    # Step 1: Find every matching business in the radius
+    # Step 1: Find every matching business in the area
     _broadcast(run_id, {
         "type": "search_start",
         "query": label,
         "location": location,
-        "message": f"🎯 LAUNCHED CAMPAIGN: {label.upper()} in {location.upper()} ({radius / 1000:g} km)"
+        "message": f"🎯 LAUNCHED CAMPAIGN: {label.upper()} in {location.upper()} ({area_text})"
     })
-    _broadcast(run_id, {"type": "status", "message": f"Mapping {location} ({radius / 1000:g} km radius) for {label}..."})
+    _broadcast(run_id, {"type": "status", "message": f"Mapping {location} ({area_text}) for {label}..."})
+    logger.info(f"Run {run_id}: {label!r} in {location!r}, {area_text}")
 
     try:
         # Google bills per call, so skip details for places already enriched;
@@ -525,6 +533,7 @@ def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: 
             niches, location, radius,
             known_place_ids=known,
             progress=lambda event: _broadcast(run_id, event),
+            area_mode=area_mode,
         )
     except Exception as e:
         if not isinstance(e, (SearchError, RuntimeError)):
@@ -535,19 +544,31 @@ def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: 
         return
 
     run["stats"]["places_calls"] = search_stats["billed_calls"]
+    final_radius = search_stats.get("radius_m", radius)
     summary = (
-        f"Coverage done: {len(businesses)} businesses ({search_stats.get('provider', 'google')}), "
-        f"{search_stats['billed_calls']} billed Places calls"
+        f"Coverage done: {len(businesses)} businesses in {search_stats.get('area', f'{radius / 1000:g} km radius')} "
+        f"({search_stats.get('provider', 'google')}), {search_stats['billed_calls']} billed Places calls"
     )
     if search_stats.get("dense_tiles"):
         summary += f" ({search_stats['dense_tiles']} very dense tiles may be incomplete)"
     _broadcast(run_id, {"type": "status", "message": summary})
+    logger.info(f"Run {run_id}: {summary}; categories={search_stats.get('niche_categories')}")
+    # Say how each niche was understood, and flag niches that found nothing
+    totals = search_stats.get("niche_totals", {})
+    for niche, info in search_stats.get("niche_categories", {}).items():
+        cats = ", ".join(info["categories"][:4]) or "business names only"
+        count = totals.get(niche, {}).get("total", 0)
+        msg = f"'{niche}' searched as: {cats} ({info['source']}) - {count} found"
+        if count == 0:
+            msg += ". Try a more common term (e.g. 'Carpenters' instead of 'Architectural Millwork')."
+        _broadcast(run_id, {"type": "status", "message": msg})
     if search_stats.get("stopped"):
         _broadcast(run_id, {"type": "error", "message": f"Search stopped early, processing what was found: {search_stats['stopped']}"})
 
     # Competitor context for pitches: "14 of 22 roofers within 5 km have a website"
+    area_label = search_stats.get("area") if area_mode == "city" else None
     for b in businesses:
-        b["market_context"] = market_context(b.get("niches") or [], search_stats.get("niche_totals", {}), radius)
+        b["market_context"] = market_context(b.get("niches") or [], totals, final_radius, area_label)
 
     run["stats"]["found"] = len(businesses)
     update_search_run(run_id, len(businesses), "running")

@@ -49,4 +49,18 @@ def geocode(location: str) -> tuple[float, float, str]:
         raise GeocodeError(f"Could not find location '{location}'")
     hit = results[0]
     _cache[key] = (float(hit["lat"]), float(hit["lon"]), hit.get("display_name", location))
+    try:  # Nominatim: [south, north, west, east] as strings
+        s, n, w, e = (float(v) for v in hit["boundingbox"])
+        _bbox_cache[key] = (s, w, n, e)
+    except (KeyError, ValueError, TypeError):
+        pass
     return _cache[key]
+
+
+_bbox_cache: dict[str, tuple[float, float, float, float]] = {}
+
+
+def boundary_box(location: str) -> tuple[float, float, float, float] | None:
+    """(south, west, north, east) of the place's boundary (whole city / region), if known."""
+    geocode(location)
+    return _bbox_cache.get(" ".join(location.lower().split()))
