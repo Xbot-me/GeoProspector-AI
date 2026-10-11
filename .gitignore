@@ -10,3 +10,6 @@ checkpoints.sqlite3
 data/run_*.csv
 *.log
 .DS_Store
+
+# agent tool cache (compact verification results, per working-tree fingerprint)
+.agent-cache/
