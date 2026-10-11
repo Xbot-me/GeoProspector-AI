@@ -5,7 +5,7 @@ Module map: `docs/MODULES.md`. Current state / open threads: `docs/HANDOFF.md`. 
 
 ## Danger zones (read first)
 - **`git push` to `main` deploys to the production VPS** (`.github/workflows/deploy.yml`). Never push to `main` without the owner's explicit yes. Work on a branch; the owner merges.
-- **The app sends real email.** The interval worker starts with the app and has no kill switch (`AUTO_SEND_EMAILS` exists in `config.py` but nothing reads it). Local runs: point `DATABASE_URL` at a local DB and leave `RESEND_API_KEY`/`SMTP_PASS` unset (sends are then simulated, but still mark leads `sent`).
+- **The app sends real email.** The interval worker starts with the app. Local runs: set `AUTO_SEND_EMAILS=false`, point `DATABASE_URL` at a local DB, and leave `RESEND_API_KEY`/`SMTP_PASS` unset (sends are then recorded as `simulated`).
 - Real API keys cost quota: Places calls are counted in `quota.py`; don't trigger searches or `/api/campaign/run_daily` to "test" without asking.
 - Never commit `.env`, `data/run_*.csv` (third-party personal data), logs or `*.sqlite3`.
 - Compliance code is load-bearing: CAN-SPAM footer, unsubscribe route, suppression list, bounce webhook. Don't weaken it in a refactor.
