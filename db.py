@@ -45,6 +45,12 @@ CREATE TABLE IF NOT EXISTS businesses (
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
     timezone TEXT,
+    international_phone TEXT,
+    niches TEXT,
+    owner_role TEXT,
+    owner_linkedin TEXT,
+    company_linkedin TEXT,
+    contacts_json TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -115,6 +121,12 @@ _MIGRATION_COLUMNS = [
     ("latitude", "DOUBLE PRECISION"),
     ("longitude", "DOUBLE PRECISION"),
     ("timezone", "TEXT"),
+    ("international_phone", "TEXT"),
+    ("niches", "TEXT"),
+    ("owner_role", "TEXT"),
+    ("owner_linkedin", "TEXT"),
+    ("company_linkedin", "TEXT"),
+    ("contacts_json", "TEXT"),
 ]
 
 
@@ -227,10 +239,13 @@ _ALL_FIELDS = [
     "pitch_subject", "pitch_body", "approval_status", "send_status",
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
     "latitude", "longitude", "timezone",
+    "international_phone", "niches", "owner_role", "owner_linkedin", "company_linkedin", "contacts_json",
 ]
 
 
 def upsert_business(record: dict) -> None:
+    if isinstance(record.get("niches"), list):  # pipeline state keeps niches as a list
+        record = {**record, "niches": ", ".join(record["niches"]) or None}
     values = [record.get(f) for f in _ALL_FIELDS]
     placeholders = ",".join("%s" for _ in _ALL_FIELDS)
     updates = ",".join(
@@ -435,6 +450,18 @@ def is_email_already_contacted(email: str, exclude_place_id: str = "") -> bool:
             (email.strip(), exclude_place_id or ""),
         ).fetchone()
         return row is not None
+
+
+def get_processed_place_ids() -> set[str]:
+    """place_ids that never need enriching again (same rule as is_business_already_processed).
+    The area search skips billed detail calls for tiles holding only these."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT place_id FROM businesses WHERE lead_score IS NOT NULL "
+            "OR send_status IN ('sent', 'pending_auto_send', 'queued', 'sending') "
+            "OR approval_status IN ('approved', 'rejected')"
+        ).fetchall()
+        return {r["place_id"] for r in rows}
 
 
 def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:

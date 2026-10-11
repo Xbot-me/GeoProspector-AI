@@ -25,12 +25,14 @@ Scoring rubric:
   Contact-ability:
     Email found  +15   (we can actually reach them)
     Phone listed  +5
+    Owner / decision maker identified  +5
+    Owner's LinkedIn found  +5
 
   Social presence:
     Has FB or IG +10   (online-aware, likely receptive)
 
   Category bonus:
-    restaurant, hotel, salon, clinic, spa, gym, dentist  +10
+    high-ticket trades and local services (see _HIGH_VALUE_CATEGORIES)  +10
 """
 import json
 
@@ -41,6 +43,12 @@ _HIGH_VALUE_CATEGORIES = {
     "cafe", "bar", "bakery", "beauty_salon", "hair_care", "lodging",
     "meal_delivery", "meal_takeaway", "night_club", "shopping_mall",
     "store", "tourist_attraction",
+    # Trades / home services: the campaign's core niches (Places primaryType values)
+    "plumber", "electrician", "roofing_contractor", "general_contractor", "painter",
+    "locksmith", "moving_company", "hvac_contractor", "landscaper", "pest_control_service",
+    "cleaning_service", "solar_energy_company", "tree_service", "concrete_contractor",
+    "garage_door_supplier", "flooring_contractor", "home_improvement_store", "auto_repair",
+    "car_repair", "veterinary_care", "physiotherapist", "chiropractor", "medical_spa",
 }
 
 
@@ -93,6 +101,14 @@ def score_lead(state: BusinessState) -> dict:
     if state.get("phone"):
         score += 5
         breakdown.append("Phone listed: +5")
+
+    if state.get("owner_name"):
+        score += 5
+        breakdown.append(f"Owner identified ({state.get('owner_role') or 'role unknown'}): +5")
+
+    if state.get("owner_linkedin"):
+        score += 5
+        breakdown.append("Owner LinkedIn found: +5")
 
     # --- Social presence ---
     if state.get("facebook_url") or state.get("instagram_url"):

@@ -5,12 +5,8 @@ Uses Gemini (free-tier Flash-Lite model) to turn raw Places data + enrichment
 findings into a short set of talking points. Now aware of website quality
 level (not just "has/doesn't have") and enrichment data (reviews, socials).
 """
-from google import genai
-
-from config import GEMINI_API_KEY, GEMINI_MODEL
+import llm
 from state import BusinessState
-
-_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
 def _describe_web_status(state: BusinessState) -> str:
@@ -29,9 +25,6 @@ def _describe_web_status(state: BusinessState) -> str:
 
 
 def analyze_business(state: BusinessState) -> dict:
-    if _client is None:
-        raise RuntimeError("GEMINI_API_KEY is not set. Add it to your local .env file.")
-
     web_status = _describe_web_status(state)
     rating = state.get("rating")
     review_count = state.get("review_count")
@@ -50,7 +43,8 @@ def analyze_business(state: BusinessState) -> dict:
 
     owner_info = ""
     if state.get("owner_name"):
-        owner_info = f"Owner/manager: {state['owner_name']}"
+        role = state.get("owner_role") or "owner/manager"
+        owner_info = f"Decision maker: {state['owner_name']} ({role})"
 
     prompt = f"""A local business was found with a web presence issue:
 
@@ -73,7 +67,6 @@ In 3-4 short bullet points, note:
 Prioritize opportunities where a solo senior developer can realistically close $2,000-$20,000 projects or create recurring SaaS revenue without needing a large sales team.
 Be concrete and avoid generic filler. Output only the bullets, no preamble."""
 
-    resp = _client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-    analysis = (resp.text or "").strip()
+    analysis = llm.generate_text(prompt)
 
     return {"analysis": analysis}

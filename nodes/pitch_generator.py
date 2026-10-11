@@ -12,12 +12,9 @@ Critical rules baked into the prompt:
   - Use owner name if discovered
   - Reference their Google reviews as THEIR social proof
 """
-from google import genai
-
-from config import GEMINI_API_KEY, GEMINI_MODEL, SENDER_NAME, SENDER_SIGNATURE
+import llm
+from config import SENDER_SIGNATURE
 from state import BusinessState
-
-_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
 def _get_pitch_angle(state: BusinessState) -> str:
@@ -40,9 +37,6 @@ def _append_signature(body: str) -> str:
 
 
 def generate_pitch(state: BusinessState) -> dict:
-    if _client is None:
-        raise RuntimeError("GEMINI_API_KEY is not set. Add it to your local .env file.")
-
     angle = _get_pitch_angle(state)
     owner = state.get("owner_name")
 
@@ -60,8 +54,9 @@ def generate_pitch(state: BusinessState) -> dict:
             "They have a Facebook page — acknowledge they're doing some online marketing."
         )
     if owner:
+        role = state.get("owner_role") or "owner/manager"
         personalization.append(
-            f"The owner/manager's name appears to be {owner} — address them by name."
+            f"The {role} is {owner}: address them by first name."
         )
 
     personalization_block = "\n".join(f"- {p}" for p in personalization) if personalization else "No extra personalization data available."
@@ -112,8 +107,7 @@ SUBJECT: <Subject line in local language>
 BODY:
 <Email body in local language>"""
 
-    resp = _client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-    text = (resp.text or "").strip()
+    text = llm.generate_text(prompt)
 
     language = "English"
     subject = "Quick question about your online presence"
