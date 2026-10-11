@@ -7,7 +7,7 @@ Read this before searching the source. Line numbers drift; use `bash scripts/age
 |---|---|
 | `app.py` | FastAPI app: routes, cookie auth middleware, WebSocket progress, pipeline threads, interval auto-send worker (started in `lifespan`). Biggest file (~880 lines): read by region. |
 | `main.py` | Older CLI runner for the pipeline (interactive approval prompt). |
-| `auto_campaign.py` | Campaign target catalog (niche x city), lead timezone lookup and send-window logic. |
+| `auto_campaign.py` | Campaign target catalog (niche x city), lead timezone lookup (stored tz > city > country) and send-window logic. |
 
 ## Pipeline (`graph.py`, state in `state.py`)
 `check_website -> find_email -> find_socials -> score_lead -> (good site? save_to_crm_skip : analyze_business -> generate_pitch -> save_to_crm)`.
@@ -15,7 +15,7 @@ Checkpointer: Postgres via `get_checkpointer_cm()`.
 
 | Node (`nodes/`) | Does |
 |---|---|
-| `places_search.py` | Google Places API (New) text search; charged against `quota.py` |
+| `places_search.py` | Google Places API (New) text search; drops closed businesses, adds coordinates + IANA timezone; charged against `quota.py` |
 | `website_check.py` | classifies `website_quality`: none / dead / social_only / outdated / good |
 | `email_finder.py` | website scrape -> DuckDuckGo -> Hunter.io; MX check via `email_verifier.py` |
 | `social_finder.py` | Facebook / Instagram / owner name |
@@ -31,7 +31,7 @@ Checkpointer: Postgres via `get_checkpointer_cm()`.
 | `db.py` | psycopg Postgres: schema + `_migrate`, runs, businesses, email log, opens, suppression, unsubscribe |
 | `email_sender.py` | HTML email builder (letterhead, stat card, CTA, CAN-SPAM footer) + `send_email` (Resend or SMTP) |
 | `email_verifier.py` | syntax + MX verification |
-| `quota.py` | monthly Places call counter (`quota_state.json`) |
+| `quota.py` | monthly Places call cap, counted in the `places_quota` table (old `quota_state.json` only seeds a month) |
 
 ## HTTP surface (`app.py`)
 - Pages: `/`, `/login`, `/history` (also `/runs`, `/public`).
@@ -52,3 +52,4 @@ Push to `main` triggers `.github/workflows/deploy.yml`: SSH to VPS, `git pull`, 
 - `BusinessState` is `total=False`: nodes read with `.get()` and return only the keys they set.
 - Every outbound email carries the CAN-SPAM footer + unsubscribe link; suppressed addresses are never sent to.
 - Daily send cap `MAX_DAILY_EMAILS`; send only inside the lead's local send window (`auto_campaign.py`).
+- Every send goes through `app._send_next_due_lead()`: cap check, first in-window lead, atomic `claim_lead_for_sending` (`send_status='sending'`). A lead stuck in `sending` at startup becomes `failed`, never auto-resent.
