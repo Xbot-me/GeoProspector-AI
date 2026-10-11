@@ -35,7 +35,7 @@ from db import (
     upsert_business, record_email_open, get_pending_auto_send_leads,
     get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
     unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
-    claim_lead_for_sending,
+    claim_lead_for_sending, is_email_already_contacted,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
@@ -788,7 +788,9 @@ def _process_single_business(run_id: str, graph_app, business: dict,
 
     run["stats"]["qualified"] += 1
     if result.get("email"):
-        if is_business_already_processed("", "", result["email"]):
+        # Another business already emailed/queued at this address. Exclude this lead's
+        # own row: save_to_crm has just queued it, so matching it would flag every lead.
+        if is_email_already_contacted(result["email"], exclude_place_id=place_id):
             logger.info(f"Skipping {name} — duplicate email {result['email']} already processed.")
             result["send_status"] = "skipped_duplicate"
             upsert_business(result)

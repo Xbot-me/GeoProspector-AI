@@ -424,6 +424,19 @@ def retry_failed_emails() -> int:
         return cursor.rowcount
 
 
+def is_email_already_contacted(email: str, exclude_place_id: str = "") -> bool:
+    """True if a different business with this email was already emailed or is queued."""
+    if not email or "@" not in email:
+        return False
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM businesses WHERE LOWER(email) = LOWER(%s) AND place_id <> %s "
+            "AND send_status IN ('sent', 'pending_auto_send', 'queued', 'sending')",
+            (email.strip(), exclude_place_id or ""),
+        ).fetchone()
+        return row is not None
+
+
 def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
     """Check if a business has already been processed or contacted (100% solid deduplication)."""
     with get_conn() as conn:
