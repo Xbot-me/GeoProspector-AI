@@ -242,7 +242,8 @@ def send_email(
         if not RESEND_API_KEY or RESEND_API_KEY.startswith("re_xxxx"):
             err = "Resend API key not configured in .env (or is placeholder)."
             print(f"[SIMULATED SEND] To: {to_email} | Subject: {subject} | Provider: Resend")
-            record_email_sent(place_id, status="sent", error="Simulated send (no live API key)")
+            # Not 'sent': a missing key must not burn the lead or count toward the daily cap.
+            record_email_sent(place_id, status="simulated", error="Simulated send (no live API key)")
             return True, None
 
         try:
@@ -282,7 +283,7 @@ def send_email(
         if not SMTP_USER or not SMTP_PASS:
             err = "SMTP credentials not configured in .env."
             print(f"[SIMULATED SEND] To: {to_email} | Subject: {subject} | Provider: SMTP")
-            record_email_sent(place_id, status="sent", error="Simulated send (no SMTP creds)")
+            record_email_sent(place_id, status="simulated", error="Simulated send (no SMTP creds)")
             return True, None
 
         msg = MIMEMultipart("alternative")

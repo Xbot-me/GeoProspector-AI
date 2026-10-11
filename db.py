@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS businesses (
     open_count INTEGER DEFAULT 0,
     sent_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
+    log_hidden BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -98,6 +99,7 @@ _MIGRATION_COLUMNS = [
     ("open_count", "INTEGER"),
     ("sent_at", "TIMESTAMP WITH TIME ZONE"),
     ("error_message", "TEXT"),
+    ("log_hidden", "BOOLEAN DEFAULT FALSE"),
 ]
 
 
@@ -305,13 +307,15 @@ def record_email_open(place_id: str, ip: str = "unknown") -> None:
 
 
 def record_email_sent(place_id: str, status: str = "sent", error: str = None) -> None:
-    """Update send_status and sent_at timestamp when an email is dispatched."""
+    """Update send_status and sent_at timestamp when an email is dispatched.
+    status is 'sent', 'failed' or 'simulated' (no provider credentials)."""
     with get_conn() as conn:
         conn.execute(
             "UPDATE businesses SET "
             "send_status = %s, "
             "sent_at = CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE sent_at END, "
             "error_message = %s, "
+            "log_hidden = FALSE, "
             "updated_at = CURRENT_TIMESTAMP "
             "WHERE place_id = %s",
             (status, status, error, place_id),
@@ -320,8 +324,8 @@ def record_email_sent(place_id: str, status: str = "sent", error: str = None) ->
 
 def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
     """Fetch leads ready to be emailed (have email, not yet sent, score qualified).
-    Excludes unsubscribed, bounced, and complained leads.
-    Prioritizes verified emails over unverified ones."""
+    Excludes unsubscribed, bounced, and complained leads, and addresses
+    that failed verification. Prioritizes verified emails over unchecked ones."""
     from config import MIN_LEAD_SCORE
     with get_conn() as conn:
         rows = conn.execute(
@@ -330,11 +334,10 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
             "AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
             "AND (lead_score IS NULL OR lead_score >= %s) "
             "AND pitch_subject IS NOT NULL AND pitch_subject != '' "
+            "AND email_verified IS DISTINCT FROM FALSE "
             "AND LOWER(email) NOT IN (SELECT LOWER(email) FROM suppression_list) "
             "ORDER BY "
-            "  CASE WHEN email_verified = TRUE THEN 0 "
-            "       WHEN email_verified IS NULL THEN 1 "
-            "       ELSE 2 END, "
+            "  CASE WHEN email_verified = TRUE THEN 0 ELSE 1 END, "
             "  lead_score DESC NULLS LAST, created_at ASC "
             "LIMIT %s",
             (MIN_LEAD_SCORE, limit),
@@ -343,12 +346,13 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
 
 
 def get_email_logs(limit: int = 50) -> list[dict]:
-    """Fetch recent email dispatch logs (sent or failed)."""
+    """Fetch recent email dispatch logs (sent, failed or simulated) not hidden by a clear."""
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT place_id, name, email, send_status, sent_at, error_message, open_count, opened_at "
             "FROM businesses "
-            "WHERE send_status IN ('sent', 'failed') OR open_count > 0 "
+            "WHERE (send_status IN ('sent', 'failed', 'simulated') OR open_count > 0) "
+            "AND NOT COALESCE(log_hidden, FALSE) "
             "ORDER BY COALESCE(sent_at, updated_at) DESC NULLS LAST "
             "LIMIT %s",
             (limit,),
@@ -357,12 +361,15 @@ def get_email_logs(limit: int = 50) -> list[dict]:
 
 
 def clear_email_logs() -> int:
-    """Clear email logs by resetting send_status to 'not_sent', error_message, sent_at, and open_count for sent/failed emails."""
+    """Hide current rows from the email log view.
+
+    Send history is kept: resetting send_status would put already-contacted
+    leads back into the auto-send queue and email them a second time."""
     with get_conn() as conn:
         cursor = conn.execute(
-            "UPDATE businesses "
-            "SET send_status = 'not_sent', sent_at = NULL, error_message = NULL, open_count = 0, opened_at = NULL "
-            "WHERE send_status IN ('sent', 'failed') OR open_count > 0"
+            "UPDATE businesses SET log_hidden = TRUE "
+            "WHERE (send_status IN ('sent', 'failed', 'simulated') OR open_count > 0) "
+            "AND NOT COALESCE(log_hidden, FALSE)"
         )
         return cursor.rowcount
 

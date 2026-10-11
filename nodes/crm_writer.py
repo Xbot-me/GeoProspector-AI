@@ -22,6 +22,7 @@ def save_to_crm(state: BusinessState) -> dict:
         "website": state.get("website"),
         "email": state.get("email"),
         "email_source": state.get("email_source"),
+        "email_verified": state.get("email_verified"),
         "rating": state.get("rating"),
         "review_count": state.get("review_count"),
         "website_quality": state.get("website_quality"),

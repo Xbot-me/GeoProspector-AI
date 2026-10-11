@@ -557,8 +557,10 @@
             <tbody>`;
 
       logs.forEach(l => {
-        const statusBadge = l.send_status === 'sent' 
+        const statusBadge = l.send_status === 'sent'
           ? `<span style="background:rgba(16,185,129,0.15); color:#10b981; padding:2px 8px; border-radius:4px; font-weight:600;">Sent</span>`
+          : l.send_status === 'simulated'
+          ? `<span style="background:rgba(148,163,184,0.15); color:#94a3b8; padding:2px 8px; border-radius:4px; font-weight:600;">Simulated</span>`
           : `<span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 8px; border-radius:4px; font-weight:600;">Failed</span>`;
         
         const openBadge = l.open_count > 0 
