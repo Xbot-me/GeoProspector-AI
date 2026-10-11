@@ -19,6 +19,7 @@ import random
 import secrets
 import time
 import uuid
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -775,33 +776,57 @@ def _process_single_business(run_id: str, graph_app, business: dict,
     })
 
 
-# ── Unsubscribe endpoint (public — no auth required) ────────────────────
+# ── Unsubscribe endpoints (public — no auth required) ──────────────────
+# GET only shows a confirmation button: link scanners and mail-client
+# prefetchers follow GET links, so GET must not change anything.
+# POST performs the unsubscribe. It also serves RFC 8058 one-click requests
+# (List-Unsubscribe-Post), which Gmail/Yahoo send as a POST to the same URL.
 
-@app.get("/api/unsubscribe/{place_id}")
-async def handle_unsubscribe(place_id: str):
-    """One-click unsubscribe endpoint linked in every outgoing email."""
-    result = unsubscribe_business(place_id)
-    name = result["name"] if result else "Unknown"
-    logger.info(f"Unsubscribed: {name} (place_id={place_id})")
-    # Return a simple, styled confirmation page
+def _unsubscribe_page(title: str, message: str, form_action: str | None = None) -> Response:
+    button = ""
+    if form_action:
+        button = f"""<form method="post" action="{form_action}" style="margin-top:20px;">
+        <button type="submit" style="background:#0f172a; color:#fff; border:0; border-radius:8px;
+            padding:12px 24px; font-size:14px; cursor:pointer;">Unsubscribe</button>
+    </form>"""
     return Response(
         content=f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unsubscribed</title></head>
+<title>{title}</title></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     display: flex; justify-content: center; align-items: center; min-height: 100vh;
     background: #f5f5f5; margin: 0; color: #333;">
 <div style="text-align: center; max-width: 400px; padding: 40px; background: white;
     border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);">
-    <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
-    <h1 style="font-size: 20px; margin: 0 0 12px;">You've been unsubscribed</h1>
-    <p style="color: #666; font-size: 14px; line-height: 1.5;">
-        You won't receive any more emails from us. Sorry for the interruption.
-    </p>
+    <h1 style="font-size: 20px; margin: 0 0 12px;">{title}</h1>
+    <p style="color: #666; font-size: 14px; line-height: 1.5;">{message}</p>
+    {button}
 </div>
 </body></html>""",
         media_type="text/html",
+    )
+
+
+@app.get("/api/unsubscribe/{place_id}")
+async def confirm_unsubscribe(place_id: str):
+    """Confirmation page linked in every outgoing email."""
+    return _unsubscribe_page(
+        "Unsubscribe from these emails?",
+        "Click the button below and you won't receive any more emails from us.",
+        form_action=f"/api/unsubscribe/{quote(place_id, safe='')}",
+    )
+
+
+@app.post("/api/unsubscribe/{place_id}")
+async def handle_unsubscribe(place_id: str):
+    """Perform the unsubscribe (confirmation form or RFC 8058 one-click POST)."""
+    result = unsubscribe_business(place_id)
+    name = result["name"] if result else "Unknown"
+    logger.info(f"Unsubscribed: {name} (place_id={place_id})")
+    return _unsubscribe_page(
+        "You've been unsubscribed",
+        "You won't receive any more emails from us. Sorry for the interruption.",
     )
 
 
