@@ -4,11 +4,15 @@ needed for a starter repo. Powered by modern PostgreSQL.
 
 Also stores search run history so every query is browsable later.
 """
+import logging
 from contextlib import contextmanager
+
 import psycopg
 from psycopg.rows import dict_row
 
 from config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_BUSINESSES = """
 CREATE TABLE IF NOT EXISTS businesses (
@@ -42,6 +46,19 @@ CREATE TABLE IF NOT EXISTS businesses (
     open_count INTEGER DEFAULT 0,
     sent_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
+    log_hidden BOOLEAN DEFAULT FALSE,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    timezone TEXT,
+    international_phone TEXT,
+    niches TEXT,
+    owner_role TEXT,
+    owner_linkedin TEXT,
+    company_linkedin TEXT,
+    contacts_json TEXT,
+    review_source TEXT,
+    review_url TEXT,
+    market_context TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -80,6 +97,15 @@ CREATE TABLE IF NOT EXISTS suppression_list (
 );
 """
 
+# Monthly Places API call counter. Lives in Postgres so it survives container
+# rebuilds (the old quota_state.json was reset on every deploy).
+SCHEMA_PLACES_QUOTA = """
+CREATE TABLE IF NOT EXISTS places_quota (
+    month TEXT PRIMARY KEY,
+    calls INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 # Columns that may not exist in older databases.
 _MIGRATION_COLUMNS = [
     ("rating", "REAL"),
@@ -101,6 +127,19 @@ _MIGRATION_COLUMNS = [
     ("open_count", "INTEGER"),
     ("sent_at", "TIMESTAMP WITH TIME ZONE"),
     ("error_message", "TEXT"),
+    ("log_hidden", "BOOLEAN DEFAULT FALSE"),
+    ("latitude", "DOUBLE PRECISION"),
+    ("longitude", "DOUBLE PRECISION"),
+    ("timezone", "TEXT"),
+    ("international_phone", "TEXT"),
+    ("niches", "TEXT"),
+    ("owner_role", "TEXT"),
+    ("owner_linkedin", "TEXT"),
+    ("company_linkedin", "TEXT"),
+    ("contacts_json", "TEXT"),
+    ("review_source", "TEXT"),
+    ("review_url", "TEXT"),
+    ("market_context", "TEXT"),
 ]
 
 
@@ -123,9 +162,12 @@ def _migrate(conn: psycopg.Connection) -> None:
     for col_name, col_type in _MIGRATION_COLUMNS:
         if col_name.lower() not in existing:
             try:
-                conn.execute(
-                    f"ALTER TABLE businesses ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
-                )
+                # Savepoint: on Postgres a failed statement aborts the whole
+                # transaction, so a bare try/except would break every later query.
+                with conn.transaction():
+                    conn.execute(
+                        f"ALTER TABLE businesses ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                    )
             except Exception as e:
                 logger.warning(f"Auto-migration warning adding column {col_name}: {e}")
 
@@ -143,10 +185,18 @@ def init_db() -> None:
         conn.execute(SCHEMA_RUNS)
         conn.execute(SCHEMA_RUN_BUSINESSES)
         conn.execute(SCHEMA_SUPPRESSION)
+        conn.execute(SCHEMA_PLACES_QUOTA)
         _migrate(conn)
         conn.execute("DELETE FROM search_runs WHERE ip_address = 'auto_pilot_daemon'")
         conn.execute("UPDATE search_runs SET status = 'complete' WHERE status = 'running'")
         conn.execute("UPDATE businesses SET send_status = 'not_sent' WHERE send_status = 'skipped_duplicate'")
+        # A lead left in 'sending' means the process died mid-send. We can't tell
+        # whether the provider accepted it, so never re-send automatically.
+        conn.execute(
+            "UPDATE businesses SET send_status = 'failed', "
+            "error_message = 'Interrupted while sending (app restarted). Check the provider log before retrying.' "
+            "WHERE send_status = 'sending'"
+        )
 
 
 # ── Search runs ──────────────────────────────────────────────────────────
@@ -209,10 +259,15 @@ _ALL_FIELDS = [
     "contact_sources", "lead_score", "score_breakdown", "analysis", "mockup_prompt",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
+    "latitude", "longitude", "timezone",
+    "international_phone", "niches", "owner_role", "owner_linkedin", "company_linkedin", "contacts_json",
+    "review_source", "review_url", "market_context",
 ]
 
 
 def upsert_business(record: dict) -> None:
+    if isinstance(record.get("niches"), list):  # pipeline state keeps niches as a list
+        record = {**record, "niches": ", ".join(record["niches"]) or None}
     values = [record.get(f) for f in _ALL_FIELDS]
     placeholders = ",".join("%s" for _ in _ALL_FIELDS)
     updates = ",".join(
@@ -313,13 +368,15 @@ def record_email_open(place_id: str, ip: str = "unknown") -> None:
 
 
 def record_email_sent(place_id: str, status: str = "sent", error: str = None) -> None:
-    """Update send_status and sent_at timestamp when an email is dispatched."""
+    """Update send_status and sent_at timestamp when an email is dispatched.
+    status is 'sent', 'failed' or 'simulated' (no provider credentials)."""
     with get_conn() as conn:
         conn.execute(
             "UPDATE businesses SET "
             "send_status = %s, "
             "sent_at = CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE sent_at END, "
             "error_message = %s, "
+            "log_hidden = FALSE, "
             "updated_at = CURRENT_TIMESTAMP "
             "WHERE place_id = %s",
             (status, status, error, place_id),
@@ -328,8 +385,8 @@ def record_email_sent(place_id: str, status: str = "sent", error: str = None) ->
 
 def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
     """Fetch leads ready to be emailed (have email, not yet sent, score qualified).
-    Excludes unsubscribed, bounced, and complained leads.
-    Prioritizes verified emails over unverified ones."""
+    Excludes unsubscribed, bounced, and complained leads, and addresses
+    that failed verification. Prioritizes verified emails over unchecked ones."""
     from config import MIN_LEAD_SCORE
     with get_conn() as conn:
         rows = conn.execute(
@@ -338,11 +395,10 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
             "AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
             "AND (lead_score IS NULL OR lead_score >= %s) "
             "AND pitch_subject IS NOT NULL AND pitch_subject != '' "
+            "AND email_verified IS DISTINCT FROM FALSE "
             "AND LOWER(email) NOT IN (SELECT LOWER(email) FROM suppression_list) "
             "ORDER BY "
-            "  CASE WHEN email_verified = TRUE THEN 0 "
-            "       WHEN email_verified IS NULL THEN 1 "
-            "       ELSE 2 END, "
+            "  CASE WHEN email_verified = TRUE THEN 0 ELSE 1 END, "
             "  lead_score DESC NULLS LAST, created_at ASC "
             "LIMIT %s",
             (MIN_LEAD_SCORE, limit),
@@ -350,13 +406,29 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def claim_lead_for_sending(place_id: str) -> dict | None:
+    """Atomically move a pending lead to 'sending' and return it.
+
+    Returns None if another sender claimed it first or its status changed
+    (unsubscribed, already sent), so the same lead is never emailed twice."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "UPDATE businesses SET send_status = 'sending', updated_at = CURRENT_TIMESTAMP "
+            "WHERE place_id = %s AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
+            "RETURNING *",
+            (place_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def get_email_logs(limit: int = 50) -> list[dict]:
-    """Fetch recent email dispatch logs (sent or failed)."""
+    """Fetch recent email dispatch logs (sent, failed or simulated) not hidden by a clear."""
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT place_id, name, email, send_status, sent_at, error_message, open_count, opened_at "
             "FROM businesses "
-            "WHERE send_status IN ('sent', 'failed') OR open_count > 0 "
+            "WHERE (send_status IN ('sent', 'failed', 'simulated') OR open_count > 0) "
+            "AND NOT COALESCE(log_hidden, FALSE) "
             "ORDER BY COALESCE(sent_at, updated_at) DESC NULLS LAST "
             "LIMIT %s",
             (limit,),
@@ -365,12 +437,15 @@ def get_email_logs(limit: int = 50) -> list[dict]:
 
 
 def clear_email_logs() -> int:
-    """Clear email logs by resetting send_status to 'not_sent', error_message, sent_at, and open_count for sent/failed emails."""
+    """Hide current rows from the email log view.
+
+    Send history is kept: resetting send_status would put already-contacted
+    leads back into the auto-send queue and email them a second time."""
     with get_conn() as conn:
         cursor = conn.execute(
-            "UPDATE businesses "
-            "SET send_status = 'not_sent', sent_at = NULL, error_message = NULL, open_count = 0, opened_at = NULL "
-            "WHERE send_status IN ('sent', 'failed') OR open_count > 0"
+            "UPDATE businesses SET log_hidden = TRUE "
+            "WHERE (send_status IN ('sent', 'failed', 'simulated') OR open_count > 0) "
+            "AND NOT COALESCE(log_hidden, FALSE)"
         )
         return cursor.rowcount
 
@@ -384,6 +459,31 @@ def retry_failed_emails() -> int:
             "WHERE send_status = 'failed' AND email IS NOT NULL AND email != ''"
         )
         return cursor.rowcount
+
+
+def is_email_already_contacted(email: str, exclude_place_id: str = "") -> bool:
+    """True if a different business with this email was already emailed or is queued."""
+    if not email or "@" not in email:
+        return False
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM businesses WHERE LOWER(email) = LOWER(%s) AND place_id <> %s "
+            "AND send_status IN ('sent', 'pending_auto_send', 'queued', 'sending')",
+            (email.strip(), exclude_place_id or ""),
+        ).fetchone()
+        return row is not None
+
+
+def get_processed_place_ids() -> set[str]:
+    """place_ids that never need enriching again (same rule as is_business_already_processed).
+    The area search skips billed detail calls for tiles holding only these."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT place_id FROM businesses WHERE lead_score IS NOT NULL "
+            "OR send_status IN ('sent', 'pending_auto_send', 'queued', 'sending') "
+            "OR approval_status IN ('approved', 'rejected')"
+        ).fetchall()
+        return {r["place_id"] for r in rows}
 
 
 def is_business_already_processed(place_id: str, name: str = "", email: str = "") -> bool:
@@ -469,6 +569,33 @@ def unsubscribe_business(place_id: str) -> dict | None:
                 (row["email"],),
             )
         return dict(row)
+
+
+# ── Places API quota ─────────────────────────────────────────────────────
+
+def increment_places_calls(month: str, n: int, cap: int, seed: int = 0) -> int | None:
+    """Add n calls to month's counter if that stays within cap.
+
+    Returns the new total, or None when the cap would be exceeded. The check
+    and increment are one UPDATE, so concurrent runs cannot overshoot.
+    seed initialises a month that has no row yet (legacy JSON counter)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO places_quota (month, calls) VALUES (%s, %s) ON CONFLICT (month) DO NOTHING",
+            (month, seed),
+        )
+        row = conn.execute(
+            "UPDATE places_quota SET calls = calls + %s "
+            "WHERE month = %s AND calls + %s <= %s RETURNING calls",
+            (n, month, n, cap),
+        ).fetchone()
+        return row["calls"] if row else None
+
+
+def get_places_calls(month: str) -> int:
+    with get_conn() as conn:
+        row = conn.execute("SELECT calls FROM places_quota WHERE month = %s", (month,)).fetchone()
+        return row["calls"] if row else 0
 
 
 def delete_daemon_search_runs() -> int:

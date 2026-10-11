@@ -1,0 +1,16 @@
+{
+  "env": {
+    "BASH_MAX_OUTPUT_LENGTH": "20000",
+    "MAX_MCP_OUTPUT_TOKENS": "15000"
+  },
+  "permissions": {
+    "deny": [
+      "Read(/.env)",
+      "Read(/data/run_*.csv)",
+      "Read(/**/*.log)",
+      "Bash(git push origin main:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force:*)"
+    ]
+  }
+}

@@ -10,9 +10,11 @@ Whether you run a web design agency, a marketing firm, or a SaaS company, GeoPro
 
 ## 🚀 Key Features
 
-* **Intelligent Google Maps Scraping:** Uses the new Google Places API to find highly targeted local businesses in specific geographic radii.
+* **Full-Radius Search on Free Open Data:** Finds every business for several niches at once inside a radius using [Overture Maps](https://overturemaps.org) places (free, no API key, includes listing emails and social links). Each area is downloaded once and cached. Google Places remains available as an optional provider (`PLACES_PROVIDER=google`).
+* **Reviews Without Google:** Ratings and review counts come from the business's own website (schema.org ratings, review widgets) and from review-site profiles (Yelp, BBB, Birdeye, Angi, Houzz, ...), recorded with their source so pitches can say "your 127 reviews on Yelp".
+* **Local Competition Angle:** Every pitch can cite how many competitors nearby have a website ("14 of 22 roofers within 5 km have a website").
 * **Built-in AI Niche Generator:** Don't know who to target? The built-in Gemini AI niche generator brainstorms high-ticket, low-tech industries in booming US cities and auto-fills your search.
-* **Deep Data Enrichment:** Automatically scrapes websites, searches DuckDuckGo, and queries Hunter.io to find owner names, emails, Facebook pages, and Instagram profiles.
+* **Deep Data Enrichment:** Crawls each business site (emails, phones, schema.org, Gemini-read team pages), Hunter.io people search, UK Companies House directors, and public LinkedIn/Facebook/Instagram profile URLs to identify the owner, their role and the best email.
 * **Automated Website Auditing:** Analyzes business websites to detect outdated CMS versions, missing mobile optimization, parked domains, or "social-only" businesses with no real website.
 * **Smart Lead Scoring:** Ranks prospects from 0-100 based on review count, rating, digital presence, and website quality so you can focus on the warmest leads.
 * **AI-Personalized Cold Emails:** Uses Google's Gemini AI to write highly personalized, honest outreach pitches based on the business's actual Google reviews and website status.
@@ -29,7 +31,7 @@ Whether you run a web design agency, a marketing firm, or a SaaS company, GeoPro
 
 ## 📦 Setup & Installation
 
-GeoProspector AI is built for easy local usage or production deployment to a VPS.
+GeoProspector AI runs locally, on Render (production: Docker web service + Render Postgres, auto-deployed from GitHub), or self-hosted with Docker Compose.
 
 ### Option 1: Run Locally
 
@@ -42,7 +44,9 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit your `.env` file and add your `GOOGLE_PLACES_API_KEY` and `GEMINI_API_KEY`.
+Edit your `.env` file and add your `GEMINI_API_KEY`. Business data comes from Overture Maps by default (no key needed); set `PLACES_PROVIDER=google` and `GOOGLE_PLACES_API_KEY` to use Google Places instead. `HUNTER_API_KEY` and `COMPANIES_HOUSE_API_KEY` are optional extra contact sources.
+
+Run the tests with `pip install -r requirements-dev.txt` then `pytest tests`.
 
 Start the server:
 ```bash
@@ -50,7 +54,7 @@ python app.py
 ```
 Open `http://localhost:8000` in your browser to access the dashboard.
 
-### Option 2: Deploy to VPS (Docker Compose + Caddy)
+### Option 2: Self-host with Docker Compose + Caddy
 
 The repository includes a production-ready `Dockerfile` running as a non-root user for security, and a `docker-compose.yml` configured to run behind a reverse proxy without exposing host ports.
 
@@ -82,7 +86,8 @@ GeoProspector AI isn't just a scraper; it's an intelligent multi-agent pipeline.
 ## 💰 API Costs & Free Tiers
 
 This tool is designed to cost **$0/month** to run:
-- **Google Places API:** You get 5,000 free search calls per month. (Note: A 100-business search costs only 5 API calls due to pagination).
+- **Overture Maps (default):** Free. Data © Overture Maps Foundation, CDLA Permissive 2.0 / Apache 2.0 depending on source; keep this attribution if you publish the data.
+- **Google Places API (optional):** The fields needed (website, phone, rating) are billed as Text Search Enterprise: 1,000 free calls/month, then about $35 per 1,000 (check your Cloud Console). One billed call returns up to 20 businesses; mapping the search area uses the free IDs-only tier. `MAX_PLACES_CALLS_PER_MONTH` (default 1000) stops runs before you exceed it.
 - **Gemini API:** Uses the Gemini free tier (1,500 requests/day).
 - **DuckDuckGo:** Free web search scraping.
 

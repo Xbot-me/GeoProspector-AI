@@ -7,24 +7,11 @@ Generates three outreach artifacts for a target business using Gemini:
 3. Email draft — Short (~100-130 words), first-person human voice with a literal [MOCKUP_LINK] placeholder. No enforced signature or domain-locked links.
 """
 import logging
-import os
-from google import genai
 
-from config import GEMINI_API_KEY, GEMINI_MODEL
+import llm
 from state import BusinessState
 
 logger = logging.getLogger(__name__)
-
-
-def _get_client():
-    key = GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
-    if not key:
-        return None
-    try:
-        return genai.Client(api_key=key)
-    except Exception as e:
-        logger.error(f"Failed to initialize Gemini client: {e}")
-        return None
 
 
 def generate_outreach_kit(state: BusinessState) -> dict:
@@ -43,8 +30,7 @@ def generate_outreach_kit(state: BusinessState) -> dict:
     fallback_subject = f"Quick website concept for {name}"
     fallback_body = f"Hi,\n\nI noticed {name} in {address} and put together a quick, custom 1-page interactive website demo for your business:\n\n[MOCKUP_LINK]\n\nWould you be open to taking a 60-second look?\n\nBest,\nMustafizur Rahman\nhello@mustafizur.info"
 
-    client = _get_client()
-    if client is None:
+    if not llm.available():
         logger.warning(f"GEMINI_API_KEY not configured — returning template fallback kit for {name}")
         return {
             "analysis": fallback_analysis,
@@ -55,10 +41,19 @@ def generate_outreach_kit(state: BusinessState) -> dict:
         }
 
     personalization = []
-    if rating and review_count and review_count >= 5:
-        personalization.append(f"They have {review_count} Google reviews with a {rating}/5 rating.")
+    if review_count and review_count >= 5:
+        source = state.get("review_source") or "Google"
+        where = "on their own website" if source == "their website" else f"on {source}"
+        stars = f" with a {rating}/5 rating" if rating else ""
+        personalization.append(f"They have {review_count} reviews {where}{stars}.")
+    if state.get("market_context"):
+        personalization.append(
+            f"Local competition: {state['market_context']}. Use this exact fact (no other numbers) "
+            "as a reason customers comparing options online may choose a competitor."
+        )
     if owner:
-        personalization.append(f"Owner/Manager name: {owner}")
+        role = state.get("owner_role") or "Owner/Manager"
+        personalization.append(f"{role}: {owner} (address them by first name)")
     if state.get("facebook_url"):
         personalization.append("Has active Facebook page.")
     if state.get("instagram_url"):
@@ -94,7 +89,7 @@ REQUIREMENTS FOR THE 3 ARTIFACTS:
 3. EMAIL DRAFT:
    Write a short, conversational, first-person cold outreach email (~100-130 words).
    - Tone: Friendly, direct, helpful web developer (human voice, no sales fluff).
-   - Hook: Reference their local reputation/reviews or standing as THEIR achievement.
+   - Hook: Reference their local reputation (the reviews given above, if any) or standing as THEIR achievement. Never invent a rating, review count or statistic.
    - Core Message: Mention you built a custom 1-page interactive demo mockup site specifically for them.
    - Include a literal placeholder: [MOCKUP_LINK] where the link will be inserted.
    - CTA: Ask a simple low-friction question if they'd like to take a look or see a 60-second walkthrough.
@@ -120,8 +115,7 @@ BODY:
 <Email draft body with [MOCKUP_LINK]>"""
 
     try:
-        resp = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-        text = (resp.text or "").strip()
+        text = llm.generate_text(prompt)  # retries Gemini rate limits with backoff
     except Exception as e:
         logger.error(f"Gemini API call failed for {name}: {e}")
         return {

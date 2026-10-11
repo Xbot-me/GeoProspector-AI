@@ -24,7 +24,6 @@ const searchForm = document.getElementById('searchForm');
 const queryInput = document.getElementById('query');
 const locationInput = document.getElementById('location');
 const radiusInput = document.getElementById('radius');
-const maxResultsInput = document.getElementById('maxResults');
 const searchBtn = document.getElementById('searchBtn');
 const exportBtn = document.getElementById('exportBtn');
 const suggestBtn = document.getElementById('suggestBtn');
@@ -438,6 +437,31 @@ function renderGoodTable(leads) {
 }
 
 
+function safeLink(url, label) {
+  if (!url || !/^https?:\/\//i.test(url)) return '';
+  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--accent-teal); text-decoration:none;">${escapeHtml(label)}</a>`;
+}
+
+// Owner, reviews and local competition: the personalisation the draft is built on.
+function leadContextHtml(l) {
+  const bits = [];
+  if (l.owner_name) {
+    const li = safeLink(l.owner_linkedin, 'LinkedIn');
+    bits.push(`👤 ${escapeHtml(l.owner_name)}${l.owner_role ? ' (' + escapeHtml(l.owner_role) + ')' : ''}${li ? ' · ' + li : ''}`);
+  }
+  if (l.review_count) {
+    const src = l.review_source && l.review_source !== 'their website' ? ` on ${l.review_source}` : '';
+    const stars = l.rating ? `${l.rating}★ · ` : '';
+    const label = `${stars}${l.review_count} reviews${src}`;  // plain text; escaped once below
+    bits.push(`⭐ ${safeLink(l.review_url, label) || escapeHtml(label)}`);
+  }
+  if (l.market_context) bits.push(`📊 ${escapeHtml(l.market_context)}`);
+  const company = safeLink(l.company_linkedin, 'Company LinkedIn');
+  if (company) bits.push(company);
+  if (!bits.length) return '';
+  return `<div class="queue-card__meta" style="margin-top:4px;">${bits.join(' &bull; ')}</div>`;
+}
+
 function renderQueueCards(leads) {
   if (leads.length === 0) {
     queueList.innerHTML = `
@@ -475,6 +499,7 @@ function renderQueueCards(leads) {
               ${l.email ? `📧 <span style="color:var(--accent-teal-dark);">${escapeHtml(l.email)}</span>` : '<span style="color:var(--stamp-rust);">No email found</span>'}
               ${l.phone ? ' &bull; 📞 ' + escapeHtml(l.phone) : ''}
             </div>
+            ${leadContextHtml(l)}
           </div>
           <span class="stamp stamp--amber">READY TO SEND</span>
         </div>
@@ -611,18 +636,35 @@ async function sendSingleEmailAPI(placeId) {
     return;
   }
 
+  const subjectEl = document.getElementById(`subject-${placeId}`);
+  const bodyEl = document.getElementById(`body-${placeId}`);
+  const pitch_subject = subjectEl ? subjectEl.value : biz.pitch_subject;
+  const pitch_body = bodyEl ? bodyEl.value : biz.pitch_body;
+  if ((pitch_body || '').includes('[MOCKUP_LINK]')) {
+    showToast('Replace [MOCKUP_LINK] with the real mockup link first', 'error');
+    return;
+  }
+
   if (!confirm(`Send email to ${biz.email} via API now?`)) return;
 
   try {
-    const res = await fetch(`/api/leads/${placeId}/status`, {
+    // Really sends (Resend/SMTP), with suppression + unsubscribe footer server-side.
+    const res = await fetch(`/api/leads/${placeId}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'sent' })
+      body: JSON.stringify({ pitch_subject, pitch_body })
     });
-    if (!res.ok) throw new Error('Dispatch failed');
-    biz.send_status = 'sent';
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    biz.send_status = data.send_status;
+    biz.pitch_subject = pitch_subject;
+    biz.pitch_body = pitch_body;
     renderLeads();
-    showToast(`Email dispatched to ${biz.email}`, 'success');
+    if (data.send_status === 'simulated') {
+      showToast('Simulated only: no email provider key is configured', 'info');
+    } else {
+      showToast(`Email sent to ${biz.email}`, 'success');
+    }
   } catch (err) {
     showToast('Dispatch error: ' + err.message, 'error');
   }
@@ -632,13 +674,12 @@ async function sendSingleEmailAPI(placeId) {
 // ── Search & Telemetry Live Progress ────────────────────────────────────
 async function handleSearchSubmit(e) {
   e.preventDefault();
-  const query = queryInput.value.trim();
+  const niches = queryInput.value.split(',').map(n => n.trim()).filter(Boolean);
   const location = locationInput.value.trim();
   const radius = parseInt(radiusInput.value) || 5000;
-  const maxResults = parseInt(maxResultsInput.value) || 15;
 
-  if (!query || !location) {
-    showToast('Query and Location are required', 'error');
+  if (!niches.length || !location) {
+    showToast('Niches and Location are required', 'error');
     return;
   }
 
@@ -653,10 +694,10 @@ async function handleSearchSubmit(e) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, location, radius, max_results: maxResults })
+      body: JSON.stringify({ niches, location, radius })
     });
+    if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
 
     state.activeRunId = data.run_id;
     connectWebSocket(data.run_id);
@@ -697,6 +738,17 @@ function handleWebSocketEvent(data) {
     lineText = `${timeStr} — searching "${data.query || 'businesses'}" in ${data.location || 'target area'}...`;
     progressStatus.textContent = lineText;
     if (progressBar) progressBar.style.width = '10%';
+  } else if (eventType === 'search_progress') {
+    // One live line while the area is downloaded / matched, instead of a line per update
+    progressStatus.textContent = `${timeStr} — ${data.message}`;
+    let line = document.getElementById('searchProgressLine');
+    if (!line) {
+      line = document.createElement('div');
+      line.id = 'searchProgressLine';
+      line.style.cssText = 'padding: 4px 0; border-bottom: 1px solid var(--border-hairline); color: var(--text-muted);';
+      eventFeed.appendChild(line);
+    }
+    line.textContent = `${timeStr} — ${data.message}`;
   } else if (eventType === 'status') {
     lineText = `${timeStr} — ${data.message}`;
     progressStatus.textContent = lineText;
@@ -720,7 +772,7 @@ function handleWebSocketEvent(data) {
     colorStyle = 'color: var(--stamp-rust);';
   } else if (eventType === 'complete') {
     const stats = data.stats || {};
-    lineText = `${timeStr} — run complete (${stats.qualified || 0} qualified, ${stats.emails_found || 0} emails found)`;
+    lineText = `${timeStr} — run complete (${stats.qualified || 0} qualified, ${stats.emails_found || 0} emails, ${stats.owners_found || 0} owners found)`;
     colorStyle = 'color: var(--stamp-green); font-weight: 600;';
     progressStatus.textContent = lineText;
     if (progressBar) progressBar.style.width = '100%';
@@ -756,16 +808,17 @@ async function handleSuggestTarget() {
   try {
     const res = await fetch('/api/suggest-target');
     const data = await res.json();
-    if (data.location) {
-      queryInput.value = data.query || 'local businesses';
+    const niches = Array.isArray(data.niches) && data.niches.length ? data.niches.join(', ') : data.query;
+    if (niches && data.location) {
+      queryInput.value = niches;
       locationInput.value = data.location;
-      showToast(`Suggested: "${data.query || 'local businesses'}" in ${data.location}`, 'info');
+      showToast(`Suggested: ${niches} in ${data.location}`, 'info');
     }
   } catch (err) {
     showToast('Failed to get suggestion', 'error');
   } finally {
     suggestBtn.disabled = false;
-    suggestBtn.textContent = 'Suggest Location Target';
+    suggestBtn.textContent = 'Suggest Niches + City';
   }
 }
 

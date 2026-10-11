@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from db import get_conn
 
@@ -180,3 +181,152 @@ def _select_best_niche(town: dict, executed_keys: set, loc_str: str) -> str:
             return niche
             
     return sorted_niches[0]
+
+
+# ---------------------------------------------------------------------------
+# Timezone mapping for every city in TARGET_CITIES
+# ---------------------------------------------------------------------------
+CITY_TIMEZONES: dict[str, str] = {
+    # US Eastern
+    "Greenville":       "America/New_York",
+    "Asheville":        "America/New_York",
+    "Wilmington":       "America/New_York",
+    "Lancaster":        "America/New_York",
+    "Gainesville":      "America/New_York",
+    "Pensacola":        "America/Chicago",
+    "Dayton":           "America/New_York",
+    "Erie":             "America/New_York",
+    "Grand Rapids":     "America/New_York",
+    "Kalamazoo":        "America/New_York",
+    "Chattanooga":      "America/New_York",
+    "Knoxville":        "America/New_York",
+    "Appleton":         "America/Chicago",
+    
+    # US Central & Mountain & Pacific
+    "Tyler":            "America/Chicago",
+    "Waco":             "America/Chicago",
+    "Lafayette":        "America/Chicago",
+    "Monroe":           "America/Chicago",
+    "Fargo":            "America/Chicago",
+    "Boise":            "America/Boise",
+    "Bend":             "America/Los_Angeles",
+
+    # Canada
+    "Kelowna":          "America/Vancouver",
+    "Sudbury":          "America/Toronto",
+    "Guelph":           "America/Toronto",
+    "Vancouver":        "America/Vancouver",
+    "Calgary":          "America/Edmonton",
+
+    # Europe & Global
+    "Aberdeen":         "Europe/London",
+    "Manchester":       "Europe/London",
+    "Bristol":          "Europe/London",
+    "Swansea":          "Europe/London",
+    "Dublin":           "Europe/Dublin",
+    "Linz":             "Europe/Vienna",
+    "Tampere":          "Europe/Helsinki",
+    "Turku":            "Europe/Helsinki",
+    "Santander":        "Europe/Madrid",
+    "Madrid":           "Europe/Madrid",
+    "Brest":            "Europe/Paris",
+    "Paris":            "Europe/Paris",
+    "Stavanger":        "Europe/Oslo",
+    "Odense":           "Europe/Copenhagen",
+    "Augsburg":         "Europe/Berlin",
+    "Berlin":           "Europe/Berlin",
+    "Coimbra":          "Europe/Lisbon",
+    "Zurich":           "Europe/Zurich",
+
+    # Australia
+    "Sydney":           "Australia/Sydney",
+    "Melbourne":        "Australia/Melbourne",
+}
+
+# Country fallback, matched against the last part of a Places formattedAddress
+# ("..., Australia"). Used only for leads saved before coordinates were stored.
+# Multi-zone countries map to their most populous zone.
+COUNTRY_TIMEZONES: dict[str, str] = {
+    "usa": "America/New_York",
+    "united states": "America/New_York",
+    "canada": "America/Toronto",
+    "uk": "Europe/London",
+    "united kingdom": "Europe/London",
+    "ireland": "Europe/Dublin",
+    "australia": "Australia/Sydney",
+    "new zealand": "Pacific/Auckland",
+    "germany": "Europe/Berlin",
+    "deutschland": "Europe/Berlin",
+    "france": "Europe/Paris",
+    "spain": "Europe/Madrid",
+    "españa": "Europe/Madrid",
+    "portugal": "Europe/Lisbon",
+    "austria": "Europe/Vienna",
+    "österreich": "Europe/Vienna",
+    "switzerland": "Europe/Zurich",
+    "schweiz": "Europe/Zurich",
+    "netherlands": "Europe/Amsterdam",
+    "belgium": "Europe/Brussels",
+    "italy": "Europe/Rome",
+    "italia": "Europe/Rome",
+    "norway": "Europe/Oslo",
+    "norge": "Europe/Oslo",
+    "sweden": "Europe/Stockholm",
+    "denmark": "Europe/Copenhagen",
+    "danmark": "Europe/Copenhagen",
+    "finland": "Europe/Helsinki",
+    "suomi": "Europe/Helsinki",
+}
+
+_DEFAULT_TZ = "America/New_York"
+
+_tz_finder = None
+
+
+def timezone_for_coordinates(lat: float | None, lng: float | None) -> str | None:
+    """IANA timezone for a point (offline lookup), or None if unknown."""
+    global _tz_finder
+    if lat is None or lng is None:
+        return None
+    try:
+        if _tz_finder is None:
+            from timezonefinder import TimezoneFinder
+            _tz_finder = TimezoneFinder()
+        return _tz_finder.timezone_at(lat=lat, lng=lng)
+    except Exception:
+        return None
+
+
+def _is_valid_tz(name: str | None) -> bool:
+    if not name:
+        return False
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+def get_lead_timezone(address: str, stored_tz: str | None = None) -> str:
+    """Return the IANA timezone for a lead.
+
+    Prefers the timezone stored from the lead's coordinates. Older leads fall
+    back to a known campaign city in the address, then the country (last
+    address component), then ``America/New_York``.
+    """
+    if _is_valid_tz(stored_tz):
+        return stored_tz
+
+    addr_lower = (address or "").lower()
+    country = addr_lower.rsplit(",", 1)[-1].strip()
+    country_tz = COUNTRY_TIMEZONES.get(country)
+
+    # Iterate longest names first so "Grand Rapids" matches before a shorter
+    # substring. A city match only counts when it agrees with the country, so
+    # "Paris, TX, USA" doesn't resolve to Europe/Paris.
+    for city in sorted(CITY_TIMEZONES, key=len, reverse=True):
+        if city.lower() in addr_lower:
+            city_tz = CITY_TIMEZONES[city]
+            if country_tz is None or city_tz.split("/")[0] == country_tz.split("/")[0]:
+                return city_tz
+    return country_tz or _DEFAULT_TZ

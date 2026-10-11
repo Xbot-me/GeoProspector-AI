@@ -15,6 +15,16 @@ class BusinessState(TypedDict, total=False):
     business_status: Optional[str]
     rating: Optional[float]
     review_count: Optional[int]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    timezone: Optional[str]          # IANA zone from coordinates, used for send windows
+    international_phone: Optional[str]
+    niches: Optional[list[str]]      # search niches that matched this business
+    listing_emails: Optional[list[str]]   # contacts already in the places listing (Overture)
+    listing_socials: Optional[list[str]]
+    review_source: Optional[str]     # where rating/review_count came from ("Google", "Yelp", ...)
+    review_url: Optional[str]
+    market_context: Optional[str]    # "14 of 22 roofers within 5 km have a website"
 
     # Website analysis
     has_real_website: bool
@@ -23,14 +33,18 @@ class BusinessState(TypedDict, total=False):
 
     # Email discovery (multi-source)
     email: Optional[str]
-    email_source: Optional[str]  # "website_scrape" | "web_search" | "hunter" | None
+    email_source: Optional[str]  # "website" | "hunter" | "web_search" | None
     email_verified: Optional[bool]  # MX record verified
 
     # Social / contact enrichment
     facebook_url: Optional[str]
     instagram_url: Optional[str]
     owner_name: Optional[str]
-    contact_sources: Optional[str]  # JSON list of where info came from
+    owner_role: Optional[str]
+    owner_linkedin: Optional[str]
+    company_linkedin: Optional[str]
+    contacts_json: Optional[str]    # JSON: all people, emails, phones, socials found (with sources)
+    contact_sources: Optional[str]  # comma list of sources that contributed
 
     # Lead scoring
     lead_score: Optional[int]        # 0-100

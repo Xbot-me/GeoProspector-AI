@@ -1,449 +1,277 @@
 """
-Multi-Source Business Discovery & Cross-Checking Engine.
+Google Places API (New) area search.
 
-Architecture:
-1. Primary: Google Places API (New) Text Search (when configured and billing/quota is available).
-2. Fallback Engine (when Google API key is missing, billing is unattached, or quota is exceeded):
-   - Source A: AI-Grounded Local Business Directory (via Gemini Flash-Lite API with structured output)
-   - Source B: OpenStreetMap Nominatim Directory (clean location syntax, real physical street addresses)
-   - Source C: Organic Search Extraction (secondary phone / website validation)
-3. Cross-Checking & Data Fusion Engine:
-   - Entity matching & fuzzy deduplication
-   - Complementary field merging (phone + street address + website URL)
-   - Cross-verification scoring (promotes businesses confirmed across multiple sources)
+Finds every business matching one or more niches inside a circle
+(location + radius) using Text Search (New) with a rectangular
+locationRestriction. It runs before the per-business graph and produces the
+list the graph iterates over.
+
+Text Search returns at most 60 results per query (3 pages of 20), so a dense
+area must be split into tiles. Two passes keep this cheap:
+
+  1. Discovery: search tiles with an IDs-only field mask, which Google does not
+     bill. A tile that returns the full 60 is split into 4 and searched again,
+     until every tile is below the limit (or too small to split).
+  2. Details: search only the final tiles again with the full field mask
+     (Enterprise tier, billed and counted by quota.py). Tiles whose places are
+     all already processed are skipped.
+
+Uses Text Search (New): https://places.googleapis.com/v1/places:searchText
 """
-from __future__ import annotations
-
-import difflib
-import hashlib
-import json
-import logging
-import re
-from urllib.parse import urlparse
+import math
+import time
+from typing import Callable
 
 import requests
 
-from config import (
-    GEMINI_API_KEY,
-    GEMINI_MODEL,
-    GOOGLE_PLACES_API_KEY,
-    MAX_PLACES_RESULTS_PER_RUN,
-    SEARCH_FIELD_MASK,
-)
+from auto_campaign import timezone_for_coordinates
+from config import GOOGLE_PLACES_API_KEY, SEARCH_FIELD_MASK
 from quota import QuotaExceededError, check_and_increment
 
-logger = logging.getLogger(__name__)
+SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 
-PLACES_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-GEMINI_GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+# Businesses Google reports as closed are never worth enriching or emailing.
+_CLOSED_STATUSES = ("CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY")
 
-# Generic aggregator domains to ignore when picking official business websites
-_AGGREGATOR_DOMAINS = {
-    "yelp.com", "yellowpages.com", "tripadvisor.com", "facebook.com",
-    "instagram.com", "linkedin.com", "twitter.com", "x.com",
-    "wikipedia.org", "mapquest.com", "bbb.org", "foursquare.com",
-    "angis.com", "angi.com", "homeadvisor.com", "thumbtack.com",
-}
+TEXT_SEARCH_MAX_RESULTS = 60   # Google's cap across all pages of one query
+PAGE_SIZE = 20
+MIN_TILE_METERS = 150          # don't split tiles smaller than this
+MAX_RADIUS_METERS = 50_000
+
+_IDS_ONLY_MASK = "places.id,nextPageToken"
+_GEOCODE_MASK = "places.location,places.formattedAddress"
+_EARTH_RADIUS_M = 6_371_000
+
+# (south, west, north, east) in degrees
+Rect = tuple[float, float, float, float]
+ProgressFn = Callable[[dict], None]
 
 
-def _normalize_name(name: str) -> str:
-    """Normalize business name for fuzzy comparison and grouping."""
-    cleaned = re.sub(r"[^\w\s]", "", name.lower())
-    tokens = [
-        t for t in cleaned.split()
-        if t not in {"llc", "inc", "ltd", "corp", "co", "company", "group", "the", "and"}
+class SearchError(RuntimeError):
+    pass
+
+
+# ── Geometry ─────────────────────────────────────────────────────────────
+
+def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+def bounding_rect(lat: float, lng: float, radius_m: float) -> Rect:
+    dlat = radius_m / 111_320
+    dlng = radius_m / (111_320 * max(math.cos(math.radians(lat)), 0.01))
+    return (lat - dlat, lng - dlng, lat + dlat, lng + dlng)
+
+
+def rect_intersects_circle(rect: Rect, lat: float, lng: float, radius_m: float) -> bool:
+    south, west, north, east = rect
+    nearest_lat = min(max(lat, south), north)
+    nearest_lng = min(max(lng, west), east)
+    return haversine_m(lat, lng, nearest_lat, nearest_lng) <= radius_m
+
+
+def rect_side_m(rect: Rect) -> float:
+    south, west, north, east = rect
+    mid_lat = (south + north) / 2
+    height = (north - south) * 111_320
+    width = (east - west) * 111_320 * math.cos(math.radians(mid_lat))
+    return max(height, width)
+
+
+def split_rect(rect: Rect) -> list[Rect]:
+    south, west, north, east = rect
+    mid_lat, mid_lng = (south + north) / 2, (west + east) / 2
+    return [
+        (south, west, mid_lat, mid_lng),
+        (south, mid_lng, mid_lat, east),
+        (mid_lat, west, north, mid_lng),
+        (mid_lat, mid_lng, north, east),
     ]
-    return " ".join(tokens).strip()
 
 
-def _clean_location_for_search(location: str) -> str:
-    """Clean location string for directory search (e.g. 'New Braunfels, TX, USA' -> 'New Braunfels TX')."""
-    loc = re.sub(r"\b(USA|United States)\b", "", location, flags=re.IGNORECASE)
-    loc = loc.replace(",", " ").strip()
-    return re.sub(r"\s+", " ", loc)
+# ── API calls ────────────────────────────────────────────────────────────
 
-
-def _extract_domain(url: str | None) -> str | None:
-    """Extract root domain without www."""
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url if "://" in url else f"http://{url}")
-        netloc = parsed.netloc.lower()
-        if netloc.startswith("www."):
-            netloc = netloc[4:]
-        return netloc or None
-    except Exception:
-        return None
-
-
-# ── Primary: Google Places API ─────────────────────────────────────────────
-
-def _search_google_places(query: str, location: str, capped_max: int) -> list[dict]:
-    """Execute Google Places API (New) Text Search."""
-    if not GOOGLE_PLACES_API_KEY:
-        raise RuntimeError("GOOGLE_PLACES_API_KEY not configured.")
-
-    check_and_increment(1)
-
-    resp = requests.post(
-        PLACES_SEARCH_URL,
-        headers={
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-            "X-Goog-FieldMask": SEARCH_FIELD_MASK,
-        },
-        json={
-            "textQuery": f"{query} in {location}",
-            "maxResultCount": capped_max,
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    results = []
-    for place in data.get("places", []):
-        results.append({
-            "place_id": place.get("id"),
-            "name": place.get("displayName", {}).get("text", "Unknown"),
-            "address": place.get("formattedAddress", ""),
-            "phone": place.get("nationalPhoneNumber"),
-            "category": place.get("primaryType") or query,
-            "website": place.get("websiteUri"),
-            "business_status": place.get("businessStatus", "OPERATIONAL"),
-            "rating": place.get("rating"),
-            "review_count": place.get("userRatingCount"),
-            "contact_sources": "Google Places API (New)",
-            "cross_verified": True,
-        })
-    return results
-
-
-# ── Fallback 1: AI Grounded Local Business Directory ────────────────────────
-
-def _search_gemini_local(query: str, location: str, max_results: int) -> list[dict]:
-    """
-    Query Gemini's structured directory knowledge for real, active local businesses.
-    High accuracy across all US cities, suburbs, and specific trade categories.
-    """
-    if not GEMINI_API_KEY:
-        logger.warning("GEMINI_API_KEY not configured for directory fallback.")
-        return []
-
-    model_name = GEMINI_MODEL or "gemini-flash-lite-latest"
-    url = GEMINI_GENERATE_URL.format(model=model_name, key=GEMINI_API_KEY)
-
-    prompt = f"""Find up to {max_results} real, active local businesses for the following search:
-Niche / Service: {query}
-Location: {location}
-
-For each real business, return its accurate real-world details in this exact JSON schema:
-[
-  {{
-    "name": "Exact Business Name",
-    "address": "Street Address, City, State Zip",
-    "phone": "Contact phone number with area code",
-    "website": "Official website URL or null if no website",
-    "category": "{query}"
-  }}
-]
-Rules:
-- Include both businesses that have websites and businesses that do not have websites.
-- Provide real, valid local phone numbers and addresses for the requested location.
-- Return ONLY the JSON array without markdown formatting or surrounding explanations.
-"""
-
-    try:
+def _post(body: dict, field_mask: str) -> dict:
+    """POST to Text Search with a small retry on rate limits / server errors."""
+    for attempt in range(3):
         resp = requests.post(
-            url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json"},
+            SEARCH_URL,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+                "X-Goog-FieldMask": field_mask,
             },
-            timeout=20,
+            json=body,
+            timeout=15,
         )
-        if resp.status_code != 200:
-            logger.warning("Gemini directory fallback HTTP %d: %s", resp.status_code, resp.text[:200])
-            return []
-
-        data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return []
-
-        raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "[]")
-        items = json.loads(raw_text)
-
-        results = []
-        for item in items:
-            name = item.get("name")
-            if not name:
-                continue
-
-            website = item.get("website")
-            domain = _extract_domain(website)
-            if domain and domain in _AGGREGATOR_DOMAINS:
-                website = None
-
-            results.append({
-                "name": name.strip(),
-                "address": item.get("address") or location,
-                "phone": item.get("phone"),
-                "website": website,
-                "category": item.get("category") or query,
-                "rating": None,
-                "review_count": None,
-                "source": "ai_directory",
-            })
-        return results
-    except Exception as e:
-        logger.warning("Gemini directory fallback error: %s", e)
-        return []
-
-
-# ── Fallback 2: OpenStreetMap Nominatim Directory ──────────────────────────
-
-def _search_openstreetmap(query: str, location: str, max_results: int) -> list[dict]:
-    """
-    Query OpenStreetMap Nominatim with clean query syntax.
-    Provides ground-truth physical address verification.
-    """
-    results = []
-    headers = {"User-Agent": "GeoProspector-AI/1.0 (Lead Discovery Agent)"}
-    clean_loc = _clean_location_for_search(location)
-
-    search_queries = [
-        f"{query} {clean_loc}",
-        clean_loc,
-    ]
-
-    for q_text in search_queries:
-        try:
-            params = {
-                "q": q_text,
-                "format": "json",
-                "addressdetails": 1,
-                "extratags": 1,
-                "limit": max_results,
-            }
-            resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                for item in resp.json():
-                    # Only take items that represent commercial amenities/shops/crafts
-                    cls = item.get("class", "")
-                    if cls not in {"amenity", "shop", "craft", "office", "tourism", "commercial"}:
-                        continue
-
-                    raw_name = item.get("name")
-                    if not raw_name:
-                        disp = item.get("display_name", "")
-                        raw_name = disp.split(",")[0] if disp else None
-                    if not raw_name:
-                        continue
-
-                    extratags = item.get("extratags") or {}
-                    addr = item.get("address") or {}
-
-                    street_parts = []
-                    if addr.get("house_number"):
-                        street_parts.append(addr["house_number"])
-                    if addr.get("road"):
-                        street_parts.append(addr["road"])
-                    if addr.get("city") or addr.get("town"):
-                        street_parts.append(addr.get("city") or addr.get("town"))
-                    if addr.get("state"):
-                        street_parts.append(addr["state"])
-                    if addr.get("postcode"):
-                        street_parts.append(addr["postcode"])
-
-                    formatted_address = ", ".join(street_parts) if street_parts else item.get("display_name", location)
-                    phone = extratags.get("phone") or extratags.get("contact:phone")
-                    website = extratags.get("website") or extratags.get("contact:website")
-                    category = item.get("type") or item.get("class") or query
-
-                    results.append({
-                        "name": raw_name.strip(),
-                        "address": formatted_address.strip(),
-                        "phone": phone.strip() if phone else None,
-                        "website": website.strip() if website else None,
-                        "category": category,
-                        "rating": None,
-                        "review_count": None,
-                        "source": "openstreetmap",
-                    })
-            if results:
-                break
-        except Exception as e:
-            logger.warning("OpenStreetMap Nominatim search error: %s", e)
-
-    return results
-
-
-# ── Cross-Checking & Data Fusion Engine ──────────────────────────────────────
-
-def _cross_check_and_merge(
-    primary_records: list[dict],
-    secondary_records: list[dict],
-    location: str,
-    capped_max: int,
-) -> list[dict]:
-    """
-    Cross-checks candidate entities across independent sources.
-    Fuses matching records, resolves conflicts, and prioritizes cross-verified leads.
-    """
-    clusters: list[dict] = []
-    all_candidates = primary_records + secondary_records
-
-    for candidate in all_candidates:
-        c_name = candidate.get("name", "").strip()
-        if not c_name:
+        if resp.status_code in (429, 500, 503) and attempt < 2:
+            time.sleep(2 * (attempt + 1))
             continue
-        c_norm = _normalize_name(c_name)
-        c_domain = _extract_domain(candidate.get("website"))
-        c_phone = re.sub(r"\D", "", candidate.get("phone") or "")
+        if resp.status_code >= 400:
+            raise SearchError(f"Places API error {resp.status_code}: {resp.text[:300]}")
+        return resp.json()
+    raise SearchError("Places API kept failing")  # pragma: no cover
 
-        matched_cluster = None
-        for cluster in clusters:
-            norm_ratio = difflib.SequenceMatcher(None, c_norm, cluster["norm_name"]).ratio()
-            if norm_ratio >= 0.82:
-                matched_cluster = cluster
-                break
 
-            if c_domain and cluster["domain"] and c_domain == cluster["domain"]:
-                matched_cluster = cluster
-                break
-
-            if len(c_phone) >= 7 and c_phone == cluster["phone_digits"]:
-                matched_cluster = cluster
-                break
-
-        if matched_cluster:
-            matched_cluster["sources"].add(candidate["source"])
-            if len(c_name) > len(matched_cluster["name"]) and not re.search(r"[-–|:]", c_name):
-                matched_cluster["name"] = c_name
-            if not matched_cluster["website"] and candidate.get("website"):
-                matched_cluster["website"] = candidate["website"]
-                matched_cluster["domain"] = _extract_domain(candidate["website"])
-            if not matched_cluster["phone"] and candidate.get("phone"):
-                matched_cluster["phone"] = candidate["phone"]
-                matched_cluster["phone_digits"] = c_phone
-            if len(candidate.get("address", "")) > len(matched_cluster["address"]):
-                matched_cluster["address"] = candidate["address"]
-            if matched_cluster["rating"] is None and candidate.get("rating") is not None:
-                matched_cluster["rating"] = candidate["rating"]
-                matched_cluster["review_count"] = candidate.get("review_count")
+def _search_tile(query: str, rect: Rect, field_mask: str, billed: bool, stats: dict) -> list[dict]:
+    """All pages of one query restricted to rect. Billed calls go through the quota guard."""
+    south, west, north, east = rect
+    body = {
+        "textQuery": query,
+        "pageSize": PAGE_SIZE,
+        "locationRestriction": {"rectangle": {
+            "low": {"latitude": south, "longitude": west},
+            "high": {"latitude": north, "longitude": east},
+        }},
+    }
+    places: list[dict] = []
+    while True:
+        if billed:
+            check_and_increment(1)
+            stats["billed_calls"] += 1
         else:
-            clusters.append({
-                "name": c_name,
-                "norm_name": c_norm,
-                "address": candidate.get("address") or location,
-                "phone": candidate.get("phone"),
-                "phone_digits": c_phone,
-                "website": candidate.get("website"),
-                "domain": c_domain,
-                "category": candidate.get("category"),
-                "rating": candidate.get("rating"),
-                "review_count": candidate.get("review_count"),
-                "sources": {candidate["source"]},
-            })
-
-    fused_leads: list[dict] = []
-    for cluster in clusters:
-        sources_list = sorted(list(cluster["sources"]))
-        cross_verified = len(sources_list) >= 2
-
-        hash_seed = f"{cluster['norm_name']}_{location.lower()}".encode("utf-8")
-        place_id = f"cross_{hashlib.sha256(hash_seed).hexdigest()[:20]}"
-
-        contact_source_desc = (
-            f"Cross-verified ({', '.join(sources_list)})"
-            if cross_verified
-            else f"Discovered via {sources_list[0]}"
-        )
-
-        fused_leads.append({
-            "place_id": place_id,
-            "name": cluster["name"],
-            "address": cluster["address"],
-            "phone": cluster["phone"],
-            "category": cluster["category"],
-            "website": cluster["website"],
-            "business_status": "OPERATIONAL",
-            "rating": cluster["rating"],
-            "review_count": cluster["review_count"],
-            "contact_sources": contact_source_desc,
-            "cross_verified": cross_verified,
-            "_source_count": len(sources_list),
-        })
-
-    fused_leads.sort(
-        key=lambda b: (
-            b["_source_count"],
-            1 if b.get("website") else 0,
-            1 if b.get("phone") else 0,
-            1 if b.get("rating") else 0,
-        ),
-        reverse=True,
-    )
-
-    for lead in fused_leads:
-        lead.pop("_source_count", None)
-
-    return fused_leads[:capped_max]
+            stats["free_calls"] += 1
+        data = _post(body, field_mask)
+        places.extend(data.get("places", []))
+        token = data.get("nextPageToken")
+        if not token or len(places) >= TEXT_SEARCH_MAX_RESULTS:
+            return places
+        body["pageToken"] = token
 
 
-# ── Public Entry Point ───────────────────────────────────────────────────────
+def geocode(location: str, stats: dict) -> tuple[float, float, str]:
+    """Centre point for a free-text location ('Austin, Texas, USA')."""
+    check_and_increment(1)
+    stats["billed_calls"] += 1
+    data = _post({"textQuery": location, "pageSize": 1}, _GEOCODE_MASK)
+    places = data.get("places") or []
+    if not places or "location" not in places[0]:
+        raise SearchError(f"Could not find location '{location}'")
+    loc = places[0]["location"]
+    return loc["latitude"], loc["longitude"], places[0].get("formattedAddress", location)
 
-def search_businesses(
-    query: str,
-    location: str,
-    radius_meters: int = 5000,
-    max_results: int | None = None,
-) -> list[dict]:
+
+def _to_business(place: dict) -> dict:
+    location = place.get("location") or {}
+    lat, lng = location.get("latitude"), location.get("longitude")
+    return {
+        "place_id": place.get("id"),
+        "name": place.get("displayName", {}).get("text", "Unknown"),
+        "address": place.get("formattedAddress", ""),
+        "phone": place.get("nationalPhoneNumber"),
+        "international_phone": place.get("internationalPhoneNumber"),
+        "category": place.get("primaryType"),
+        "website": place.get("websiteUri"),
+        "business_status": place.get("businessStatus"),
+        "rating": place.get("rating"),
+        "review_count": place.get("userRatingCount"),
+        "latitude": lat,
+        "longitude": lng,
+        "timezone": timezone_for_coordinates(lat, lng),
+    }
+
+
+# ── Area search ──────────────────────────────────────────────────────────
+
+def _discover_leaf_tiles(query: str, lat: float, lng: float, radius_m: float,
+                         stats: dict, progress: ProgressFn) -> list[tuple[Rect, set[str]]]:
+    """Free IDs-only pass: split saturated tiles until each is below the 60 cap."""
+    leaves: list[tuple[Rect, set[str]]] = []
+    pending = [bounding_rect(lat, lng, radius_m)]
+    while pending:
+        rect = pending.pop()
+        ids = {p["id"] for p in _search_tile(query, rect, _IDS_ONLY_MASK, billed=False, stats=stats) if p.get("id")}
+        stats["tiles_searched"] += 1
+        saturated = len(ids) >= TEXT_SEARCH_MAX_RESULTS
+        if saturated and rect_side_m(rect) > MIN_TILE_METERS:
+            pending.extend(t for t in split_rect(rect) if rect_intersects_circle(t, lat, lng, radius_m))
+        else:
+            if saturated:
+                stats["dense_tiles"] += 1  # still capped at the smallest tile size
+            if ids:
+                leaves.append((rect, ids))
+        progress({"type": "search_progress", "niche": query, "tiles_searched": stats["tiles_searched"],
+                  "tiles_pending": len(pending), "message": f"Mapping '{query}': {stats['tiles_searched']} tiles searched, {len(pending)} to go"})
+    return leaves
+
+
+def search_area(niches: list[str], location: str, radius_m: int,
+                known_place_ids: set[str] | None = None,
+                progress: ProgressFn | None = None) -> tuple[list[dict], dict]:
     """
-    Main business search discovery entry point.
+    Find every open business matching any niche within radius_m of location.
 
-    1. Tries Google Places API (New) if key exists and within monthly quota.
-    2. Seamlessly falls back to AI-grounded directory discovery + OpenStreetMap
-       cross-checking if Google Places billing or quota is unavailable.
+    Returns (businesses, stats). businesses carry a "niches" list of the
+    queries that matched them. stats["stopped"] is set if the monthly quota
+    cap interrupted the run; the businesses found so far are still returned.
+    known_place_ids lets the details pass skip tiles that hold nothing new.
     """
-    capped_max = min(max_results or MAX_PLACES_RESULTS_PER_RUN, MAX_PLACES_RESULTS_PER_RUN)
-    capped_max = min(capped_max, 25)
+    if not GOOGLE_PLACES_API_KEY:
+        raise RuntimeError("GOOGLE_PLACES_API_KEY is not set. Add it to your local .env file.")
+    progress = progress or (lambda event: None)
+    known = known_place_ids or set()
+    radius_m = max(100, min(int(radius_m), MAX_RADIUS_METERS))
+    stats = {"billed_calls": 0, "free_calls": 0, "tiles_searched": 0, "dense_tiles": 0,
+             "tiles_skipped_known": 0, "outside_radius": 0, "closed": 0, "stopped": None,
+             "provider": "google", "niche_totals": {}}
 
-    # 1. Attempt Google Places API if key exists
-    if GOOGLE_PLACES_API_KEY:
-        try:
-            logger.info("Querying Google Places API for '%s' in '%s'", query, location)
-            google_results = _search_google_places(query, location, capped_max)
-            if google_results:
-                return google_results
-            logger.warning("Google Places API returned 0 results. Triggering multi-source fallback.")
-        except QuotaExceededError as e:
-            logger.warning("Google Places API quota exceeded (%s). Engaging fallback.", e)
-        except Exception as e:
-            logger.warning("Google Places API call failed (%s). Engaging fallback.", e)
-    else:
-        logger.info("GOOGLE_PLACES_API_KEY not set. Engaging multi-source fallback engine.")
+    found: dict[str, dict] = {}
+    rejected: set[str] = set()  # closed / outside radius: counted once even if several niches return them
+    try:
+        lat, lng, resolved = geocode(location, stats)
+        stats["center"] = {"latitude": lat, "longitude": lng, "resolved": resolved}
 
-    # 2. Multi-Source Fallback Execution
-    logger.info("Executing multi-source fallback discovery for '%s' in '%s'", query, location)
+        for niche in niches:
+            leaves = _discover_leaf_tiles(niche, lat, lng, radius_m, stats, progress)
+            for i, (rect, ids) in enumerate(leaves, 1):
+                new_ids = ids - known - rejected - found.keys()
+                if not new_ids:
+                    stats["tiles_skipped_known"] += 1
+                    # Still record the niche match for businesses found by an earlier niche.
+                    for pid in ids & found.keys():
+                        if niche not in found[pid]["niches"]:
+                            found[pid]["niches"].append(niche)
+                    continue
+                for place in _search_tile(niche, rect, SEARCH_FIELD_MASK, billed=True, stats=stats):
+                    biz = _to_business(place)
+                    pid = biz["place_id"]
+                    if not pid or pid in known or pid in rejected:
+                        continue
+                    if pid in found:
+                        if niche not in found[pid]["niches"]:
+                            found[pid]["niches"].append(niche)
+                        continue
+                    if biz["business_status"] in _CLOSED_STATUSES:
+                        stats["closed"] += 1
+                        rejected.add(pid)
+                        continue
+                    if biz["latitude"] is None or haversine_m(lat, lng, biz["latitude"], biz["longitude"]) > radius_m:
+                        stats["outside_radius"] += 1
+                        rejected.add(pid)
+                        continue
+                    biz["niches"] = [niche]
+                    found[pid] = biz
+                progress({"type": "search_progress", "niche": niche, "found": len(found),
+                          "message": f"Loading '{niche}' details: tile {i}/{len(leaves)}, {len(found)} businesses so far"})
+    except QuotaExceededError as e:
+        stats["stopped"] = str(e)
 
-    ai_directory = _search_gemini_local(query, location, max_results=capped_max)
-    osm_directory = _search_openstreetmap(query, location, max_results=capped_max)
+    # Competitor counts (new businesses only: known tiles were not re-fetched)
+    for biz in found.values():
+        for n in biz["niches"]:
+            totals = stats["niche_totals"].setdefault(n, {"total": 0, "with_website": 0})
+            totals["total"] += 1
+            totals["with_website"] += int(bool(biz.get("website")))
+    return list(found.values()), stats
 
-    # 3. Cross-Check and Fuse Results
-    fused_results = _cross_check_and_merge(
-        primary_records=ai_directory,
-        secondary_records=osm_directory,
-        location=location,
-        capped_max=capped_max,
-    )
 
-    logger.info(
-        "Discovery complete: extracted %d leads (AI Directory: %d, OSM: %d)",
-        len(fused_results), len(ai_directory), len(osm_directory),
-    )
-
-    return fused_results
+def search_businesses(query: str, location: str, radius_meters: int = 5000,
+                      max_results: int | None = None) -> list[dict]:
+    """Single-niche wrapper kept for the CLI (main.py)."""
+    businesses, stats = search_area([query], location, radius_meters)
+    if stats["stopped"] and not businesses:
+        raise QuotaExceededError(stats["stopped"])
+    return businesses[:max_results] if max_results else businesses

@@ -1,9 +1,9 @@
 """
 Email delivery client supporting both Resend API and Direct SMTP.
-Wraps plain text pitches in a professional letterhead-style HTML layout
-(header, optional rating/review stat card, single CTA, slim signature,
-CAN-SPAM footer) with an embedded 1x1 tracking pixel for open reporting.
+Wraps the plain-text draft in minimal HTML (escaped paragraphs, CAN-SPAM
+footer with address + unsubscribe link, 1x1 open-tracking pixel).
 """
+import html
 import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -40,9 +40,18 @@ def format_html_email(
     for p in paragraphs:
         if not p.strip():
             continue
-        p_br = p.replace("\n", "<br>")
+        # Drafts come from an LLM fed with scraped text: never let them inject markup.
+        p_br = html.escape(p).replace("\n", "<br>")
         formatted_p.append(f"<p style='margin: 0 0 16px 0; line-height: 1.6; color: #1e293b; font-family: sans-serif; font-size: 15px;'>{p_br}</p>")
     html_paragraphs = "".join(formatted_p)
+
+    # CAN-SPAM: address + unsubscribe must be visible in the HTML part too.
+    unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"
+    footer_html = (
+        "<p style='margin:32px 0 0 0; font-size:11px; line-height:1.6; color:#94a3b8; font-family:sans-serif;'>"
+        f"{html.escape(SENDER_PHYSICAL_ADDRESS or 'Dhaka, Bangladesh')}<br>"
+        f"Not interested? <a href='{unsub_url}' style='color:#94a3b8;'>Unsubscribe</a>.</p>"
+    )
 
     tracking_pixel = (
         f"<img src='{TRACKING_BASE_URL}/api/track/open/{place_id}.png' "
@@ -58,6 +67,7 @@ def format_html_email(
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin:0; padding:24px 16px; background-color:#ffffff;">
     <div style="max-width:600px; margin:0 auto;">
         {html_paragraphs}
+        {footer_html}
     </div>
     {tracking_pixel}
 </body>
@@ -103,7 +113,8 @@ def send_email(
         if not RESEND_API_KEY or RESEND_API_KEY.startswith("re_xxxx"):
             err = "Resend API key not configured in .env (or is placeholder)."
             print(f"[SIMULATED SEND] To: {to_email} | Subject: {subject} | Provider: Resend")
-            record_email_sent(place_id, status="sent", error="Simulated send (no live API key)")
+            # Not 'sent': a missing key must not mark the lead as contacted.
+            record_email_sent(place_id, status="simulated", error="Simulated send (no live API key)")
             return True, None
 
         try:
@@ -143,7 +154,7 @@ def send_email(
         if not SMTP_USER or not SMTP_PASS:
             err = "SMTP credentials not configured in .env."
             print(f"[SIMULATED SEND] To: {to_email} | Subject: {subject} | Provider: SMTP")
-            record_email_sent(place_id, status="sent", error="Simulated send (no SMTP creds)")
+            record_email_sent(place_id, status="simulated", error="Simulated send (no SMTP creds)")
             return True, None
 
         msg = MIMEMultipart("alternative")

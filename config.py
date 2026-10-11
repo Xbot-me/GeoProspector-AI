@@ -45,8 +45,24 @@ https://www.fiverr.com/users/mustafizur_dev/portfolio
 hello@mustafizur.info
 +8801886769509"""
 
-MAX_PLACES_RESULTS_PER_RUN = _int("MAX_PLACES_RESULTS_PER_RUN", 25)
-MAX_PLACES_CALLS_PER_MONTH = _int("MAX_PLACES_CALLS_PER_MONTH", 4000)
+# Billed Places calls per calendar month (counted in Postgres by quota.py).
+# Area search bills one call per 20 businesses (plus one geocode per run);
+# the tiling pass uses the free IDs-only tier. 1000 = the Enterprise free tier.
+MAX_PLACES_CALLS_PER_MONTH = _int("MAX_PLACES_CALLS_PER_MONTH", 1000)
+
+# Where businesses come from: "overture" (free open data, default) or "google"
+# (Places API, billed; has ratings/reviews).
+# Empty values in .env ("KEY=") count as unset.
+PLACES_PROVIDER = (os.getenv("PLACES_PROVIDER") or "overture").strip().lower()
+OVERTURE_RELEASE = os.getenv("OVERTURE_RELEASE") or "latest"      # or e.g. "2026-09-23.1"
+OVERTURE_MIN_CONFIDENCE = float(os.getenv("OVERTURE_MIN_CONFIDENCE") or 0.5)
+# Nominatim (free geocoder) requires an identifying User-Agent.
+NOMINATIM_USER_AGENT = os.getenv("NOMINATIM_USER_AGENT") or (
+    f"GeoProspector-AI/1.0 (+{os.getenv('UNSUBSCRIBE_BASE_URL') or 'https://github.com/Xbot-me/GeoProspector-AI'})"
+)
+
+# Optional enrichment sources (all free tiers)
+COMPANIES_HOUSE_API_KEY = os.getenv("COMPANIES_HOUSE_API_KEY", "")  # UK company officers
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://appuser:secretpassword@localhost:5432/geoprospector")
 if DATABASE_URL.startswith("postgres://"):
@@ -80,16 +96,11 @@ if not _raw_admin_pw:
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = _raw_admin_pw
 
-# Minimal field masks -- keep these as small as possible to control billing tier.
-# Places API (New) bills the WHOLE request at the tier of its most expensive
-# field. websiteUri lives in the "Pro" tier, so any search that needs it to
-# detect "no website" businesses is billed as Pro (5,000 free calls/month as
-# of the SKU pricing Google introduced in March 2025), not Essentials
-# (10,000 free calls/month). Verify current tiers/limits in your own Cloud
-# Console before relying on these numbers for budgeting.
-#
-# rating and userRatingCount are also Pro-tier — since we're already on
-# Pro for websiteUri, requesting them doesn't change the billing tier.
+# Field mask for the billed details pass of the area search. Places API (New)
+# bills a request at the tier of its most expensive field: websiteUri, the
+# phone numbers, rating and userRatingCount are "Text Search Enterprise"
+# (1,000 free calls/month, then about $35 per 1,000 as of 2026). Check current
+# tiers in your Cloud Console. nextPageToken is needed for pagination.
 SEARCH_FIELD_MASK = (
     "places.id,"
     "places.displayName,"
@@ -97,8 +108,10 @@ SEARCH_FIELD_MASK = (
     "places.location,"
     "places.websiteUri,"
     "places.nationalPhoneNumber,"
+    "places.internationalPhoneNumber,"
     "places.primaryType,"
     "places.businessStatus,"
     "places.rating,"
-    "places.userRatingCount"
+    "places.userRatingCount,"
+    "nextPageToken"
 )
