@@ -41,7 +41,10 @@ from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_s
 from graph import build_graph, get_checkpointer_cm
 from nodes.places_search import search_businesses
 from quota import QuotaExceededError
-from config import MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL, ADMIN_USERNAME, ADMIN_PASSWORD
+from config import (
+    MIN_LEAD_SCORE, GEMINI_API_KEY, GEMINI_MODEL, ADMIN_USERNAME, ADMIN_PASSWORD,
+    AUTO_SEND_EMAILS, MAX_DAILY_EMAILS,
+)
 
 from google import genai
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -73,9 +76,14 @@ def _interval_worker_loop():
     _scheduler_state["is_running"] = True
     while True:
         try:
+            if not AUTO_SEND_EMAILS:
+                _scheduler_state["next_send_time"] = "Auto-send disabled (AUTO_SEND_EMAILS=false)"
+                time.sleep(60)
+                continue
+
             sent_today = get_daily_sent_count()
-            if sent_today >= 20:
-                _scheduler_state["next_send_time"] = "Daily quota reached (20/20)"
+            if sent_today >= MAX_DAILY_EMAILS:
+                _scheduler_state["next_send_time"] = f"Daily quota reached ({sent_today}/{MAX_DAILY_EMAILS})"
                 time.sleep(300)
                 continue
 
@@ -244,7 +252,8 @@ async def get_scheduler_status():
         "is_running": _scheduler_state["is_running"],
         "scheduled_count": len(pending),
         "daily_sent_total": sent_today,
-        "daily_limit": 20,
+        "daily_limit": MAX_DAILY_EMAILS,
+        "auto_send_enabled": AUTO_SEND_EMAILS,
         "next_send_time": _scheduler_state["next_send_time"] or ("Queue empty" if not pending else "Calculating..."),
         "last_error": _scheduler_state.get("last_error")
     }
@@ -506,9 +515,10 @@ async def run_daily_campaign(request: Request):
     """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
     # 1. Process 1 pending auto-send lead immediately (the background interval worker handles the rest)
     sent_today = get_daily_sent_count()
-    remaining_quota = max(0, 20 - sent_today)
-    
-    pending_leads = get_pending_auto_send_leads(limit=1 if remaining_quota > 0 else 0)
+    remaining_quota = max(0, MAX_DAILY_EMAILS - sent_today)
+
+    can_send = AUTO_SEND_EMAILS and remaining_quota > 0
+    pending_leads = get_pending_auto_send_leads(limit=1) if can_send else []
     dispatched_count = 0
     for biz in pending_leads:
         success, _ = send_email(
