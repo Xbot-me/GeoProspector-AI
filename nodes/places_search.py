@@ -7,8 +7,12 @@ Uses Text Search (New): https://places.googleapis.com/v1/places:searchText
 """
 import requests
 
+from auto_campaign import timezone_for_coordinates
 from config import GOOGLE_PLACES_API_KEY, MAX_PLACES_RESULTS_PER_RUN, SEARCH_FIELD_MASK
 from quota import check_and_increment
+
+# Businesses Google reports as closed are never worth enriching or emailing.
+_CLOSED_STATUSES = ("CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY")
 
 SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 
@@ -18,7 +22,8 @@ def search_businesses(query: str, location: str, radius_meters: int = 5000,
     """
     Returns a list of raw business dicts with keys:
     place_id, name, address, phone, category, website, business_status,
-    rating, review_count
+    rating, review_count, latitude, longitude, timezone
+    (closed businesses are dropped)
     """
     if not GOOGLE_PLACES_API_KEY:
         raise RuntimeError(
@@ -51,6 +56,10 @@ def search_businesses(query: str, location: str, radius_meters: int = 5000,
 
     results = []
     for place in data.get("places", []):
+        if place.get("businessStatus") in _CLOSED_STATUSES:
+            continue
+        location = place.get("location") or {}
+        lat, lng = location.get("latitude"), location.get("longitude")
         results.append({
             "place_id": place.get("id"),
             "name": place.get("displayName", {}).get("text", "Unknown"),
@@ -61,5 +70,8 @@ def search_businesses(query: str, location: str, radius_meters: int = 5000,
             "business_status": place.get("businessStatus"),
             "rating": place.get("rating"),
             "review_count": place.get("userRatingCount"),
+            "latitude": lat,
+            "longitude": lng,
+            "timezone": timezone_for_coordinates(lat, lng),
         })
     return results

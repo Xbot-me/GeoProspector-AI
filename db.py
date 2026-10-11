@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS businesses (
     sent_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
     log_hidden BOOLEAN DEFAULT FALSE,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    timezone TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -80,6 +83,15 @@ CREATE TABLE IF NOT EXISTS suppression_list (
 );
 """
 
+# Monthly Places API call counter. Lives in Postgres so it survives container
+# rebuilds (the old quota_state.json was reset on every deploy).
+SCHEMA_PLACES_QUOTA = """
+CREATE TABLE IF NOT EXISTS places_quota (
+    month TEXT PRIMARY KEY,
+    calls INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 # Columns that may not exist in older databases.
 _MIGRATION_COLUMNS = [
     ("rating", "REAL"),
@@ -100,6 +112,9 @@ _MIGRATION_COLUMNS = [
     ("sent_at", "TIMESTAMP WITH TIME ZONE"),
     ("error_message", "TEXT"),
     ("log_hidden", "BOOLEAN DEFAULT FALSE"),
+    ("latitude", "DOUBLE PRECISION"),
+    ("longitude", "DOUBLE PRECISION"),
+    ("timezone", "TEXT"),
 ]
 
 
@@ -139,8 +154,16 @@ def init_db() -> None:
         conn.execute(SCHEMA_RUNS)
         conn.execute(SCHEMA_RUN_BUSINESSES)
         conn.execute(SCHEMA_SUPPRESSION)
+        conn.execute(SCHEMA_PLACES_QUOTA)
         _migrate(conn)
         conn.execute("DELETE FROM search_runs WHERE ip_address = 'auto_pilot_daemon'")
+        # A lead left in 'sending' means the process died mid-send. We can't tell
+        # whether the provider accepted it, so never re-send automatically.
+        conn.execute(
+            "UPDATE businesses SET send_status = 'failed', "
+            "error_message = 'Interrupted while sending (app restarted). Check the provider log before retrying.' "
+            "WHERE send_status = 'sending'"
+        )
 
 
 # ── Search runs ──────────────────────────────────────────────────────────
@@ -203,6 +226,7 @@ _ALL_FIELDS = [
     "contact_sources", "lead_score", "score_breakdown", "analysis",
     "pitch_subject", "pitch_body", "approval_status", "send_status",
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
+    "latitude", "longitude", "timezone",
 ]
 
 
@@ -345,6 +369,21 @@ def get_pending_auto_send_leads(limit: int = 1) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def claim_lead_for_sending(place_id: str) -> dict | None:
+    """Atomically move a pending lead to 'sending' and return it.
+
+    Returns None if another sender claimed it first or its status changed
+    (unsubscribed, already sent), so the same lead is never emailed twice."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "UPDATE businesses SET send_status = 'sending', updated_at = CURRENT_TIMESTAMP "
+            "WHERE place_id = %s AND send_status IN ('not_sent', 'pending_auto_send', 'queued') "
+            "RETURNING *",
+            (place_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def get_email_logs(limit: int = 50) -> list[dict]:
     """Fetch recent email dispatch logs (sent, failed or simulated) not hidden by a clear."""
     with get_conn() as conn:
@@ -472,6 +511,33 @@ def unsubscribe_business(place_id: str) -> dict | None:
                 (row["email"],),
             )
         return dict(row)
+
+
+# ── Places API quota ─────────────────────────────────────────────────────
+
+def increment_places_calls(month: str, n: int, cap: int, seed: int = 0) -> int | None:
+    """Add n calls to month's counter if that stays within cap.
+
+    Returns the new total, or None when the cap would be exceeded. The check
+    and increment are one UPDATE, so concurrent runs cannot overshoot.
+    seed initialises a month that has no row yet (legacy JSON counter)."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO places_quota (month, calls) VALUES (%s, %s) ON CONFLICT (month) DO NOTHING",
+            (month, seed),
+        )
+        row = conn.execute(
+            "UPDATE places_quota SET calls = calls + %s "
+            "WHERE month = %s AND calls + %s <= %s RETURNING calls",
+            (n, month, n, cap),
+        ).fetchone()
+        return row["calls"] if row else None
+
+
+def get_places_calls(month: str) -> int:
+    with get_conn() as conn:
+        row = conn.execute("SELECT calls FROM places_quota WHERE month = %s", (month,)).fetchone()
+        return row["calls"] if row else 0
 
 
 def delete_daemon_search_runs() -> int:

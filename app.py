@@ -23,7 +23,7 @@ from urllib.parse import quote
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Response
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
@@ -35,6 +35,7 @@ from db import (
     upsert_business, record_email_open, get_pending_auto_send_leads,
     get_daily_sent_count, get_email_logs, clear_email_logs, is_business_already_processed,
     unsubscribe_business, add_to_suppression, get_suppression_list, record_email_sent, retry_failed_emails,
+    claim_lead_for_sending,
 )
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
@@ -71,58 +72,91 @@ _scheduler_state = {
 }
 
 
+# Serialises "check cap -> claim lead -> send" between the interval worker and
+# /api/campaign/run_daily inside this process; the DB claim covers other processes.
+_send_lock = Lock()
+
+
+def _send_next_due_lead() -> dict:
+    """Send at most one email to the best pending lead that is inside its send window.
+
+    Returns {"outcome", "message", "wait_seconds"} where outcome is one of
+    "sent", "failed", "disabled", "quota", "empty", "outside_window".
+    """
+    with _send_lock:
+        if not AUTO_SEND_EMAILS:
+            return {"outcome": "disabled", "message": "Auto-send disabled (AUTO_SEND_EMAILS=false)", "wait_seconds": 60}
+
+        sent_today = get_daily_sent_count()
+        if sent_today >= MAX_DAILY_EMAILS:
+            return {"outcome": "quota", "message": f"Daily quota reached ({sent_today}/{MAX_DAILY_EMAILS})", "wait_seconds": 300}
+
+        pending = get_pending_auto_send_leads(limit=200)
+        _scheduler_state["scheduled_count"] = len(pending)
+        if not pending:
+            return {"outcome": "empty", "message": "Queue empty (waiting for leads...)", "wait_seconds": 60}
+
+        # Leads are in priority order; send the first one whose local time is
+        # inside a send window instead of letting one lead block the queue.
+        soonest: tuple[int, str] | None = None
+        for biz in pending:
+            lead_tz = get_lead_timezone(biz.get("address") or "", biz.get("timezone"))
+            if not is_good_send_time(lead_tz):
+                wait = seconds_until_next_window(lead_tz)
+                if soonest is None or wait < soonest[0]:
+                    soonest = (wait, lead_tz)
+                continue
+
+            claimed = claim_lead_for_sending(biz["place_id"])
+            if not claimed:
+                continue  # status changed since we listed it (unsubscribed, sent elsewhere)
+
+            try:
+                success, err = send_email(
+                    place_id=claimed["place_id"],
+                    to_email=claimed["email"],
+                    subject=claimed["pitch_subject"],
+                    body_text=claimed["pitch_body"],
+                    rating=claimed.get("rating"),
+                    review_count=claimed.get("review_count"),
+                )
+            except Exception as e:
+                success, err = False, f"Unexpected send error: {e}"
+                record_email_sent(claimed["place_id"], status="failed", error=err)
+
+            if success:
+                return {"outcome": "sent", "message": f"Sent to {claimed.get('name')} ({lead_tz})", "wait_seconds": 0}
+            return {"outcome": "failed", "message": err, "wait_seconds": 0}
+
+        wait, tz = soonest if soonest else (3600, "unknown")
+        return {
+            "outcome": "outside_window",
+            "message": f"Waiting for business hours (next: {tz}, ~{wait // 60}m)",
+            "wait_seconds": wait,
+        }
+
+
 def _interval_worker_loop():
     logger.info("Starting background interval email sender...")
     _scheduler_state["is_running"] = True
     while True:
         try:
-            if not AUTO_SEND_EMAILS:
-                _scheduler_state["next_send_time"] = "Auto-send disabled (AUTO_SEND_EMAILS=false)"
-                time.sleep(60)
+            result = _send_next_due_lead()
+            outcome = result["outcome"]
+
+            if outcome in ("sent", "failed"):
+                if outcome == "failed":
+                    _scheduler_state["last_error"] = result["message"]
+                # Sleep for randomized interval (25 to 35 minutes)
+                delay_mins = random.randint(25, 35)
+                next_time = datetime.now() + timedelta(minutes=delay_mins)
+                _scheduler_state["next_send_time"] = f"{next_time.strftime('%I:%M %p')} (~{delay_mins}m interval)"
+                time.sleep(delay_mins * 60)
                 continue
 
-            sent_today = get_daily_sent_count()
-            if sent_today >= MAX_DAILY_EMAILS:
-                _scheduler_state["next_send_time"] = f"Daily quota reached ({sent_today}/{MAX_DAILY_EMAILS})"
-                time.sleep(300)
-                continue
-
-            pending = get_pending_auto_send_leads(limit=100)
-            _scheduler_state["scheduled_count"] = len(pending)
-
-            if not pending:
-                _scheduler_state["next_send_time"] = "Queue empty (waiting for leads...)"
-                time.sleep(60)
-                continue
-
-            # Pick the first pending lead to send
-            biz = pending[0]
-
-            # Timezone-aware send timing: only send during business hours
-            lead_tz = get_lead_timezone(biz.get("address", ""))
-            if not is_good_send_time(lead_tz):
-                wait_secs = seconds_until_next_window(lead_tz)
-                _scheduler_state["next_send_time"] = f"Waiting for business hours in {lead_tz} (~{wait_secs // 60}m)"
-                logger.info(f"Outside send window for {lead_tz}, sleeping {wait_secs}s")
-                time.sleep(min(wait_secs, 3600))  # Re-check at least every hour
-                continue
-
-            success, err = send_email(
-                place_id=biz["place_id"],
-                to_email=biz["email"],
-                subject=biz["pitch_subject"],
-                body_text=biz["pitch_body"],
-                rating=biz.get("rating"),
-                review_count=biz.get("review_count"),
-            )
-            if not success:
-                _scheduler_state["last_error"] = err
-
-            # Sleep for randomized interval (25 to 35 minutes)
-            delay_mins = random.randint(25, 35)
-            next_time = datetime.now() + timedelta(minutes=delay_mins)
-            _scheduler_state["next_send_time"] = f"{next_time.strftime('%I:%M %p')} (~{delay_mins}m interval)"
-            time.sleep(delay_mins * 60)
+            _scheduler_state["next_send_time"] = result["message"]
+            # Re-check at least hourly, and never spin faster than once a minute
+            time.sleep(max(60, min(result["wait_seconds"], 3600)))
         except Exception as e:
             logger.error(f"Interval worker exception: {e}")
             _scheduler_state["last_error"] = str(e)
@@ -513,24 +547,11 @@ def trigger_auto_pilot_search_run(ip_address: str = "auto_pilot") -> tuple[str, 
 @app.post("/api/campaign/run_daily")
 async def run_daily_campaign(request: Request):
     """Trigger the daily auto-pilot campaign (rotation target + auto-send pending leads)."""
-    # 1. Process 1 pending auto-send lead immediately (the background interval worker handles the rest)
+    # 1. Send up to one due lead now (same rules as the interval worker:
+    #    cap, send window, atomic claim). The worker handles the rest.
+    send_result = await asyncio.to_thread(_send_next_due_lead)
+    dispatched_count = 1 if send_result["outcome"] == "sent" else 0
     sent_today = get_daily_sent_count()
-    remaining_quota = max(0, MAX_DAILY_EMAILS - sent_today)
-
-    can_send = AUTO_SEND_EMAILS and remaining_quota > 0
-    pending_leads = get_pending_auto_send_leads(limit=1) if can_send else []
-    dispatched_count = 0
-    for biz in pending_leads:
-        success, _ = send_email(
-            place_id=biz["place_id"],
-            to_email=biz["email"],
-            subject=biz["pitch_subject"],
-            body_text=biz["pitch_body"],
-            rating=biz.get("rating"),
-            review_count=biz.get("review_count"),
-        )
-        if success:
-            dispatched_count += 1
 
     # 2. Select next target from curated US/Global rotation and launch run
     forwarded = request.headers.get("X-Forwarded-For")
@@ -542,7 +563,8 @@ async def run_daily_campaign(request: Request):
         "run_id": run_id,
         "target": target,
         "dispatched_from_queue": dispatched_count,
-        "daily_sent_total": sent_today + dispatched_count
+        "send_result": send_result["message"],
+        "daily_sent_total": sent_today,
     }
 
 
@@ -688,6 +710,9 @@ def _run_pipeline_thread(run_id: str, query: str, location: str,
             "website": b.get("website"),
             "rating": b.get("rating"),
             "review_count": b.get("review_count"),
+            "latitude": b.get("latitude"),
+            "longitude": b.get("longitude"),
+            "timezone": b.get("timezone"),
             "approval_status": "pending",
             "send_status": "not_sent",
         })

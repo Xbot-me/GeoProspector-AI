@@ -15,6 +15,9 @@ class BusinessState(TypedDict, total=False):
     business_status: Optional[str]
     rating: Optional[float]
     review_count: Optional[int]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    timezone: Optional[str]          # IANA zone from coordinates, used for send windows
 
     # Website analysis
     has_real_website: bool

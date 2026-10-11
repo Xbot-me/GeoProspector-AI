@@ -138,23 +138,93 @@ CITY_TIMEZONES: dict[str, str] = {
     "Melbourne":        "Australia/Melbourne",
 }
 
+# Country fallback, matched against the last part of a Places formattedAddress
+# ("..., Australia"). Used only for leads saved before coordinates were stored.
+# Multi-zone countries map to their most populous zone.
+COUNTRY_TIMEZONES: dict[str, str] = {
+    "usa": "America/New_York",
+    "united states": "America/New_York",
+    "canada": "America/Toronto",
+    "uk": "Europe/London",
+    "united kingdom": "Europe/London",
+    "ireland": "Europe/Dublin",
+    "australia": "Australia/Sydney",
+    "new zealand": "Pacific/Auckland",
+    "germany": "Europe/Berlin",
+    "deutschland": "Europe/Berlin",
+    "france": "Europe/Paris",
+    "spain": "Europe/Madrid",
+    "españa": "Europe/Madrid",
+    "portugal": "Europe/Lisbon",
+    "austria": "Europe/Vienna",
+    "österreich": "Europe/Vienna",
+    "switzerland": "Europe/Zurich",
+    "schweiz": "Europe/Zurich",
+    "netherlands": "Europe/Amsterdam",
+    "belgium": "Europe/Brussels",
+    "italy": "Europe/Rome",
+    "italia": "Europe/Rome",
+    "norway": "Europe/Oslo",
+    "norge": "Europe/Oslo",
+    "sweden": "Europe/Stockholm",
+    "denmark": "Europe/Copenhagen",
+    "danmark": "Europe/Copenhagen",
+    "finland": "Europe/Helsinki",
+    "suomi": "Europe/Helsinki",
+}
+
 _DEFAULT_TZ = "America/New_York"
 
+_tz_finder = None
 
-def get_lead_timezone(address: str) -> str:
-    """Return the IANA timezone for a lead based on its address string.
 
-    Checks whether any city name from TARGET_CITIES appears in *address*
-    (case-insensitive) and returns the mapped timezone.  Falls back to
-    ``America/New_York`` when no match is found.
+def timezone_for_coordinates(lat: float | None, lng: float | None) -> str | None:
+    """IANA timezone for a point (offline lookup), or None if unknown."""
+    global _tz_finder
+    if lat is None or lng is None:
+        return None
+    try:
+        if _tz_finder is None:
+            from timezonefinder import TimezoneFinder
+            _tz_finder = TimezoneFinder()
+        return _tz_finder.timezone_at(lat=lat, lng=lng)
+    except Exception:
+        return None
+
+
+def _is_valid_tz(name: str | None) -> bool:
+    if not name:
+        return False
+    try:
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+def get_lead_timezone(address: str, stored_tz: str | None = None) -> str:
+    """Return the IANA timezone for a lead.
+
+    Prefers the timezone stored from the lead's coordinates. Older leads fall
+    back to a known campaign city in the address, then the country (last
+    address component), then ``America/New_York``.
     """
-    addr_lower = address.lower()
-    # Iterate longest names first so "College Station" matches before
-    # a hypothetical shorter substring.
+    if _is_valid_tz(stored_tz):
+        return stored_tz
+
+    addr_lower = (address or "").lower()
+    country = addr_lower.rsplit(",", 1)[-1].strip()
+    country_tz = COUNTRY_TIMEZONES.get(country)
+
+    # Iterate longest names first so "Grand Rapids" matches before a shorter
+    # substring. A city match only counts when it agrees with the country, so
+    # "Paris, TX, USA" doesn't resolve to Europe/Paris.
     for city in sorted(CITY_TIMEZONES, key=len, reverse=True):
         if city.lower() in addr_lower:
-            return CITY_TIMEZONES[city]
-    return _DEFAULT_TZ
+            city_tz = CITY_TIMEZONES[city]
+            if country_tz is None or city_tz.split("/")[0] == country_tz.split("/")[0]:
+                return city_tz
+    return country_tz or _DEFAULT_TZ
 
 
 def is_good_send_time(timezone_str: str) -> bool:
