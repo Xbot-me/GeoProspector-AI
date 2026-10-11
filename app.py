@@ -137,57 +137,51 @@ app = FastAPI(title="Maps Outreach Agent", lifespan=lifespan)
 
 # ── Authentication Middleware ───────────────────────────────────────────
 
-@app.middleware("http")
-async def basic_auth_middleware(request: Request, call_next):
-    path = request.url.path
-    # Allow public endpoints and login assets without authentication
-    if (
+def _is_authenticated(conn: Request | WebSocket) -> bool:
+    """True for a valid session cookie or valid HTTP Basic credentials."""
+    session_token = conn.cookies.get("admin_session")
+    if session_token and session_token in _sessions:
+        return True
+
+    auth_header = conn.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Basic "):
+        return False
+    try:
+        decoded_creds = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+        username, _, password = decoded_creds.partition(":")
+        return secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)
+    except Exception:
+        return False
+
+
+def _is_public_path(path: str) -> bool:
+    # The public archive may list runs and (redacted) leads; CSV exports stay private.
+    if path == "/api/runs" or (path.startswith("/api/runs/") and path.endswith("/leads")):
+        return True
+    return (
         path in ("/history", "/runs", "/public", "/login") or
-        path.startswith("/api/runs") or
         path.startswith("/api/track/") or
         path.startswith("/api/auth/") or
         path.startswith("/api/unsubscribe/") or
         path.startswith("/api/webhooks/") or
         path in ("/static/history.html", "/static/history.js", "/static/login.html", "/static/style.css", "/favicon.ico")
-    ):
+    )
+
+
+@app.middleware("http")
+async def basic_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if _is_public_path(path) or _is_authenticated(request):
         return await call_next(request)
 
-    # 1. Check Cookie Session Token first (Modern HTML login)
-    session_token = request.cookies.get("admin_session")
-    if session_token and session_token in _sessions:
-        return await call_next(request)
-
-    # 2. Fallback to HTTP Basic Auth (API scripts / cron jobs)
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Basic "):
-        if path.startswith("/api/"):
-            return Response(
-                status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
-                content="Unauthorized: Admin credentials required.",
-            )
-        # Redirect browser navigation to modern login page
-        return RedirectResponse(url="/login", status_code=303)
-
-    try:
-        encoded_creds = auth_header.split(" ", 1)[1]
-        decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
-        username, _, password = decoded_creds.partition(":")
-
-        if not (secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)):
-            return Response(
-                status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
-                content="Invalid credentials.",
-            )
-    except Exception:
+    if path.startswith("/api/"):
         return Response(
             status_code=401,
             headers={"WWW-Authenticate": 'Basic realm="Admin Dashboard"'},
-            content="Invalid Authorization header format.",
+            content="Unauthorized: Admin credentials required.",
         )
-
-    return await call_next(request)
+    # Redirect browser navigation to modern login page
+    return RedirectResponse(url="/login", status_code=303)
 
 
 # ── Static file serving ─────────────────────────────────────────────────
@@ -290,16 +284,31 @@ async def get_lead(place_id: str):
     return biz
 
 
+# Fields the public archive may show to visitors who are not logged in.
+# Contact details, owner names and pitches are third-party personal data.
+_PUBLIC_LEAD_FIELDS = (
+    "place_id", "name", "category", "rating", "review_count",
+    "website", "website_quality", "lead_score",
+)
+
+
 @app.get("/api/runs")
-async def list_runs():
+async def list_runs(request: Request):
     """Return all past search runs, newest first."""
-    return get_all_runs()
+    runs = get_all_runs()
+    if not _is_authenticated(request):
+        for r in runs:
+            r.pop("ip_address", None)
+    return runs
 
 
 @app.get("/api/runs/{run_id}/leads")
-async def get_run_leads(run_id: str):
-    """Return all businesses found in a specific search run."""
-    return get_businesses_for_run(run_id)
+async def get_run_leads(run_id: str, request: Request):
+    """Return all businesses found in a specific search run (redacted when not logged in)."""
+    leads = get_businesses_for_run(run_id)
+    if _is_authenticated(request):
+        return leads
+    return [{k: lead.get(k) for k in _PUBLIC_LEAD_FIELDS} for lead in leads]
 
 
 @app.get("/api/runs/{run_id}/csv")
@@ -550,24 +559,9 @@ async def update_lead_status(place_id: str, payload: dict):
 
 @app.websocket("/ws/{run_id}")
 async def websocket_endpoint(websocket: WebSocket, run_id: str):
-    # Check cookie session first
-    session_token = websocket.cookies.get("admin_session")
-    if not (session_token and session_token in _sessions):
-        # Fallback to HTTP Basic Auth
-        auth_header = websocket.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Basic "):
-            await websocket.close(code=4001, reason="Unauthorized")
-            return
-        try:
-            encoded_creds = auth_header.split(" ", 1)[1]
-            decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
-            username, _, password = decoded_creds.partition(":")
-            if not (secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD)):
-                await websocket.close(code=4001, reason="Invalid credentials")
-                return
-        except Exception:
-            await websocket.close(code=4001, reason="Invalid auth")
-            return
+    if not _is_authenticated(websocket):
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
 
     await websocket.accept()
     _ws_clients.setdefault(run_id, []).append(websocket)
