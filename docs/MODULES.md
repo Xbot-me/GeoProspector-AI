@@ -15,7 +15,9 @@ Checkpointer: Postgres via `get_checkpointer_cm()`.
 
 | Node (`nodes/`) | Does |
 |---|---|
-| `places_search.py` | `search_area(niches, location, radius)`: finds every business in the circle. Free IDs-only pass splits tiles that hit Google's 60-result cap; billed pass only on leaf tiles with unknown places. Drops closed/outside-radius, adds coordinates + timezone. |
+| `area_search.py` | provider switch (`PLACES_PROVIDER`): `overture` (default) or `google`; same `search_area()` / `search_businesses()` contract |
+| `places_overture.py` | Overture Maps places via DuckDB: downloads the search box once (cached in `data/overture_cache/`), matches niches to Overture categories (`NicheMatcher`: curated map + whole-word fallback + name match for generic `contractor`), drops closed/low-confidence/outside radius, merges duplicate listings, returns listing emails/socials and per-niche competitor totals. Geocoding: `geocode.py` (Nominatim). |
+| `places_search.py` | Google provider. `search_area(niches, location, radius)`: finds every business in the circle. Free IDs-only pass splits tiles that hit Google's 60-result cap; billed pass only on leaf tiles with unknown places. Drops closed/outside-radius, adds coordinates + timezone. |
 | `website_check.py` | classifies `website_quality`: none / dead / social_only / outdated / good |
 | `contact_finder.py` | combines `enrichment/*` sources; picks owner (role priority) and send email (own domain > owner > generic); full detail in `contacts_json` |
 | `lead_scorer.py` | 0-100 score + breakdown |
@@ -30,7 +32,7 @@ Checkpointer: Postgres via `get_checkpointer_cm()`.
 | `db.py` | psycopg Postgres: schema + `_migrate`, runs, businesses, email log, opens, suppression, unsubscribe |
 | `email_sender.py` | HTML email builder (letterhead, stat card, CTA, CAN-SPAM footer) + `send_email` (Resend or SMTP) |
 | `email_verifier.py` | syntax + MX verification |
-| `enrichment/` | `website` (crawl + extract), `ai_extract` (Gemini names, verified in text), `hunter`, `companies_house` (UK), `web_search` (ddgs: FB/IG/LinkedIn URLs) |
+| `enrichment/` | `website` (crawl + extract incl. schema.org rating), `ai_extract` (Gemini names, verified in text), `hunter`, `companies_house` (UK), `web_search` (ddgs: FB/IG/LinkedIn URLs), `reviews` (rating/count from site or review-site profile pages; strict name + slug match) |
 | `llm.py` | shared Gemini client: `generate_text` / `generate_json` with 429 backoff |
 | `suggestions.py` | `suggest_bundle()`: 3-5 niches + city, never searched or recently suggested; Gemini then catalog |
 | `quota.py` | monthly Places call cap, counted in the `places_quota` table (old `quota_state.json` only seeds a month) |
@@ -59,4 +61,5 @@ Push to `main` triggers `.github/workflows/deploy.yml`: SSH to VPS, `git pull`, 
 - Daily send cap `MAX_DAILY_EMAILS`; send only inside the lead's local send window (`auto_campaign.py`).
 - Email dedupe after enrichment must exclude the lead's own row (`is_email_already_contacted(..., exclude_place_id)`).
 - Names from Gemini are kept only if they appear verbatim in the source text.
+- A review count is used only from the business's own site or its own profile page on a review site (not "Top 10" lists, not similarly named businesses), with at least 3 reviews. Pitches never invent ratings.
 - Every send goes through `app._send_next_due_lead()`: cap check, first in-window lead, atomic `claim_lead_for_sending` (`send_status='sending'`). A lead stuck in `sending` at startup becomes `failed`, never auto-resent.
