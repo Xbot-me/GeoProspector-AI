@@ -13,3 +13,4 @@ data/run_*.csv
 
 # agent tool cache (compact verification results, per working-tree fingerprint)
 .agent-cache/
+data/overture_cache/

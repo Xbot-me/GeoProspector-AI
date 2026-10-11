@@ -14,7 +14,7 @@ from langgraph.types import Command
 from config import MIN_LEAD_SCORE
 from db import already_processed, init_db
 from graph import build_graph, get_checkpointer_cm
-from nodes.places_search import search_businesses
+from nodes.area_search import search_businesses
 from quota import QuotaExceededError
 
 

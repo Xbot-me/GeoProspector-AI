@@ -11,3 +11,4 @@ fastapi>=0.115.0
 uvicorn>=0.34.0
 dnspython>=2.4.0
 timezonefinder>=6.5.0
+duckdb>=1.1.0

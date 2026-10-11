@@ -40,7 +40,7 @@ from db import (
 from email_sender import format_html_email, send_email
 from auto_campaign import get_next_campaign_target, get_lead_timezone, is_good_send_time, seconds_until_next_window
 from graph import build_graph, get_checkpointer_cm
-from nodes.places_search import SearchError, search_area
+from nodes.area_search import SearchError, search_area
 from suggestions import split_niches, suggest_bundle
 from quota import QuotaExceededError
 from config import (
@@ -118,6 +118,7 @@ def _send_next_due_lead() -> dict:
                     body_text=claimed["pitch_body"],
                     rating=claimed.get("rating"),
                     review_count=claimed.get("review_count"),
+                    review_source=claimed.get("review_source"),
                 )
             except Exception as e:
                 success, err = False, f"Unexpected send error: {e}"
@@ -358,7 +359,7 @@ _CSV_FIELDS = [
     "name", "lead_score", "website_quality", "website", "email", "email_source",
     "owner_name", "owner_role", "owner_linkedin", "company_linkedin",
     "phone", "international_phone", "facebook_url", "instagram_url",
-    "rating", "review_count", "category", "niches", "address",
+    "rating", "review_count", "review_source", "market_context", "category", "niches", "address",
     "pitch_subject", "pitch_body",
 ]
 
@@ -592,6 +593,16 @@ def _broadcast(run_id: str, event: dict):
             clients.remove(ws)
 
 
+def market_context(niches: list[str], totals: dict, radius_m: int) -> str | None:
+    """Competitor line for the pitch, from the area search's per-niche counts."""
+    for niche in niches:
+        t = totals.get(niche)
+        if t and t["total"] >= 3:
+            return (f"{t['with_website']} of {t['total']} {niche.lower()} within "
+                    f"{radius_m / 1000:g} km have a website")
+    return None
+
+
 def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: int):
     """Main pipeline execution — runs in a background thread."""
     run = _runs[run_id]
@@ -623,13 +634,17 @@ def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: 
     run["stats"]["places_calls"] = search_stats["billed_calls"]
     summary = (
         f"Coverage done: {len(businesses)} new businesses, {search_stats['tiles_searched']} tiles mapped, "
-        f"{search_stats['billed_calls']} billed Places calls"
+        f"{search_stats['billed_calls']} billed Places calls ({search_stats.get('provider', 'google')})"
     )
     if search_stats["dense_tiles"]:
         summary += f" ({search_stats['dense_tiles']} very dense tiles may be incomplete)"
     _broadcast(run_id, {"type": "status", "message": summary})
     if search_stats["stopped"]:
         _broadcast(run_id, {"type": "error", "message": f"Search stopped early, processing what was found: {search_stats['stopped']}"})
+
+    # Competitor context for pitches: "14 of 22 roofers within 5 km have a website"
+    for b in businesses:
+        b["market_context"] = market_context(b.get("niches") or [], search_stats.get("niche_totals", {}), radius)
 
     # Businesses already in the CRM under this place_id (duplicate emails are checked after enrichment)
     new_businesses = []
@@ -673,6 +688,7 @@ def _run_pipeline_thread(run_id: str, niches: list[str], location: str, radius: 
             "timezone": b.get("timezone"),
             "international_phone": b.get("international_phone"),
             "niches": ", ".join(b.get("niches") or []) or None,
+            "market_context": b.get("market_context"),
             "approval_status": "pending",
             "send_status": "not_sent",
         })

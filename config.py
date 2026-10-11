@@ -50,6 +50,17 @@ hello@mustafizur.info
 # the tiling pass uses the free IDs-only tier. 1000 = the Enterprise free tier.
 MAX_PLACES_CALLS_PER_MONTH = _int("MAX_PLACES_CALLS_PER_MONTH", 1000)
 
+# Where businesses come from: "overture" (free open data, default) or "google"
+# (Places API, billed; has ratings/reviews).
+# Empty values in .env ("KEY=") count as unset.
+PLACES_PROVIDER = (os.getenv("PLACES_PROVIDER") or "overture").strip().lower()
+OVERTURE_RELEASE = os.getenv("OVERTURE_RELEASE") or "latest"      # or e.g. "2026-09-23.1"
+OVERTURE_MIN_CONFIDENCE = float(os.getenv("OVERTURE_MIN_CONFIDENCE") or 0.5)
+# Nominatim (free geocoder) requires an identifying User-Agent.
+NOMINATIM_USER_AGENT = os.getenv("NOMINATIM_USER_AGENT") or (
+    f"GeoProspector-AI/1.0 (+{os.getenv('UNSUBSCRIBE_BASE_URL') or 'https://github.com/Xbot-me/GeoProspector-AI'})"
+)
+
 # Optional enrichment sources (all free tiers)
 COMPANIES_HOUSE_API_KEY = os.getenv("COMPANIES_HOUSE_API_KEY", "")  # UK company officers
 

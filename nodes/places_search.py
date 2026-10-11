@@ -215,7 +215,8 @@ def search_area(niches: list[str], location: str, radius_m: int,
     known = known_place_ids or set()
     radius_m = max(100, min(int(radius_m), MAX_RADIUS_METERS))
     stats = {"billed_calls": 0, "free_calls": 0, "tiles_searched": 0, "dense_tiles": 0,
-             "tiles_skipped_known": 0, "outside_radius": 0, "closed": 0, "stopped": None}
+             "tiles_skipped_known": 0, "outside_radius": 0, "closed": 0, "stopped": None,
+             "provider": "google", "niche_totals": {}}
 
     found: dict[str, dict] = {}
     rejected: set[str] = set()  # closed / outside radius: counted once even if several niches return them
@@ -258,6 +259,12 @@ def search_area(niches: list[str], location: str, radius_m: int,
     except QuotaExceededError as e:
         stats["stopped"] = str(e)
 
+    # Competitor counts (new businesses only: known tiles were not re-fetched)
+    for biz in found.values():
+        for n in biz["niches"]:
+            totals = stats["niche_totals"].setdefault(n, {"total": 0, "with_website": 0})
+            totals["total"] += 1
+            totals["with_website"] += int(bool(biz.get("website")))
     return list(found.values()), stats
 
 
