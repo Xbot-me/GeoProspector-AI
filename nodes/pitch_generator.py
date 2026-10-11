@@ -10,7 +10,8 @@ Critical rules baked into the prompt:
   - Never claim previous clients or fake experience
   - Never fabricate portfolio links
   - Use owner name if discovered
-  - Reference their Google reviews as THEIR social proof
+  - Reference their reviews (Google, Yelp, ...) as THEIR social proof
+  - Use local competition ("14 of 22 roofers nearby have a website") when known
 """
 import llm
 from config import SENDER_SIGNATURE
@@ -44,10 +45,18 @@ def generate_pitch(state: BusinessState) -> dict:
     personalization = []
     rating = state.get("rating")
     review_count = state.get("review_count")
-    if rating and review_count and review_count >= 10:
+    source = state.get("review_source") or "Google"
+    if review_count and review_count >= 5:
+        where = "on their own website" if source == "their website" else f"on {source}"
+        stars = f" with a {rating}/5 rating" if rating else ""
         personalization.append(
-            f"They have {review_count} Google reviews with a {rating}/5 rating "
+            f"They have {review_count} reviews {where}{stars} "
             f"— reference this as THEIR achievement, not yours."
+        )
+    if state.get("market_context"):
+        personalization.append(
+            f"Local competition: {state['market_context']}. Use this as a concrete, factual reason "
+            f"customers comparing options online may pick a competitor. Do not invent other numbers."
         )
     if state.get("facebook_url"):
         personalization.append(
@@ -88,7 +97,7 @@ Personalization data:
 {personalization_block}
 
 COPYWRITING FRAMEWORK — "Value-First Mockup Offer":
-1. Compliment Hook: Start by acknowledging their hard-earned reputation (e.g., mention their Google rating/reviews or local standing as THEIR achievement).
+1. Compliment Hook: Start by acknowledging their hard-earned reputation (their reviews if given above, otherwise their years serving the area or local standing) as THEIR achievement. Never invent a rating or review count.
 2. Friction Point: Explain specifically WHY their website state (e.g., HTTP error, outdated design, slow mobile load, or lack of a real website) is causing potential local customers or smartphone users to bounce or call competitors.
 3. Zero-Risk Offer: Offer to put together a free visual 3-page mockup or homepage design concept for them at ZERO cost or commitment before they ever pay a dime.
 4. Call to Action (CTA): End with a simple, low-friction question asking if they'd be open to seeing a quick preview or 2-minute video mockup.

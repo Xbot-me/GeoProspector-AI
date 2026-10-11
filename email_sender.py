@@ -4,6 +4,7 @@ Wraps plain text pitches in a professional letterhead-style HTML layout
 (header, optional rating/review stat card, single CTA, slim signature,
 CAN-SPAM footer) with an embedded 1x1 tracking pixel for open reporting.
 """
+import html
 import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -64,11 +65,15 @@ def _build_header_html() -> str:
   <tr><td style="height:3px; background:linear-gradient(90deg,#2563eb,#06b6d4); font-size:0; line-height:0;">&nbsp;</td></tr>"""
 
 
-def _build_stat_card_html(rating: float | None, review_count: int | None) -> str:
-    """Highlight the lead's own Google rating/review count as a visual badge.
+def _build_stat_card_html(rating: float | None, review_count: int | None, review_source: str | None = None) -> str:
+    """Highlight the lead's own rating/review count (Google, Yelp, ...) as a visual badge.
     Returns an empty string when we don't have both data points to show."""
     if rating is None or review_count is None:
         return ""
+    if review_source and review_source != "their website":
+        reviews_label = f"Reviews on {html.escape(review_source)}"
+    else:
+        reviews_label = "Customer reviews"
     return f"""<tr>
     <td style="padding:0 32px 20px 32px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:12px;">
@@ -82,7 +87,7 @@ def _build_stat_card_html(rating: float | None, review_count: int | None) -> str
                 </td>
                 <td style="border-left:1px solid #e2e8f0; padding-left:28px; vertical-align:top;">
                   <div style="font-size:26px; font-weight:800; color:#0f172a; line-height:1;">{review_count}</div>
-                  <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-top:4px;">Customer reviews</div>
+                  <div style="font-size:11px; color:#94a3b8; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-top:4px;">{reviews_label}</div>
                 </td>
               </tr>
             </table>
@@ -142,6 +147,7 @@ def format_html_email(
     place_id: str,
     rating: float | None = None,
     review_count: int | None = None,
+    review_source: str | None = None,
 ) -> str:
     """Wrap plain text in the letterhead-style responsive HTML email:
     header, optional rating/review stat card, body copy, CTA button,
@@ -168,7 +174,7 @@ def format_html_email(
     html_paragraphs = "".join(formatted_p)
 
     header_html = _build_header_html()
-    stat_card_html = _build_stat_card_html(rating, review_count)
+    stat_card_html = _build_stat_card_html(rating, review_count, review_source)
     cta_html = _build_cta_html()
     signature_html = _build_signature_html()
     footer_html = _build_canspam_footer_html(place_id)
@@ -209,6 +215,7 @@ def send_email(
     body_text: str,
     rating: float | None = None,
     review_count: int | None = None,
+    review_source: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Dispatch email using configured provider (resend or smtp).
@@ -229,7 +236,8 @@ def send_email(
         return False, err
 
     body_text = _clean_body_text(body_text)
-    html_body = format_html_email(body_text, place_id, rating=rating, review_count=review_count)
+    html_body = format_html_email(body_text, place_id, rating=rating, review_count=review_count,
+                                  review_source=review_source)
 
     # Build plain-text footer for the text/plain MIME part
     unsub_url = f"{UNSUBSCRIBE_BASE_URL}/api/unsubscribe/{place_id}"

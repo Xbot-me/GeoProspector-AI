@@ -30,7 +30,9 @@ def analyze_business(state: BusinessState) -> dict:
     review_count = state.get("review_count")
     review_info = ""
     if rating and review_count:
-        review_info = f"Google rating: {rating}/5 with {review_count} reviews"
+        review_info = f"Rating: {rating}/5 from {review_count} reviews ({state.get('review_source') or 'Google'})"
+    if state.get("market_context"):
+        review_info += f"\nLocal competition: {state['market_context']}"
 
     social_info = ""
     socials = []
@@ -62,8 +64,8 @@ In 3-4 short bullet points, note:
    issue (be specific to their category and location, not generic)
 2. One concrete opportunity they're missing (e.g. online ordering for a
    restaurant, appointment booking for a salon)
-3. If they have good Google reviews, mention that as an asset they could
-   leverage better with a proper website
+3. If they have good reviews, mention that as an asset they could leverage
+   better with a proper website; if local competition is given, how they compare
 Prioritize opportunities where a solo senior developer can realistically close $2,000-$20,000 projects or create recurring SaaS revenue without needing a large sales team.
 Be concrete and avoid generic filler. Output only the bullets, no preamble."""
 

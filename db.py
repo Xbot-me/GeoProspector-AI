@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS businesses (
     owner_linkedin TEXT,
     company_linkedin TEXT,
     contacts_json TEXT,
+    review_source TEXT,
+    review_url TEXT,
+    market_context TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -127,6 +130,9 @@ _MIGRATION_COLUMNS = [
     ("owner_linkedin", "TEXT"),
     ("company_linkedin", "TEXT"),
     ("contacts_json", "TEXT"),
+    ("review_source", "TEXT"),
+    ("review_url", "TEXT"),
+    ("market_context", "TEXT"),
 ]
 
 
@@ -240,6 +246,7 @@ _ALL_FIELDS = [
     "email_language", "email_verified", "opened_at", "open_count", "sent_at", "error_message",
     "latitude", "longitude", "timezone",
     "international_phone", "niches", "owner_role", "owner_linkedin", "company_linkedin", "contacts_json",
+    "review_source", "review_url", "market_context",
 ]
 
 

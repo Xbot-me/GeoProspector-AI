@@ -20,6 +20,11 @@ class BusinessState(TypedDict, total=False):
     timezone: Optional[str]          # IANA zone from coordinates, used for send windows
     international_phone: Optional[str]
     niches: Optional[list[str]]      # search niches that matched this business
+    listing_emails: Optional[list[str]]   # contacts already in the places listing (Overture)
+    listing_socials: Optional[list[str]]
+    review_source: Optional[str]     # where rating/review_count came from ("Google", "Yelp", ...)
+    review_url: Optional[str]
+    market_context: Optional[str]    # "14 of 22 roofers within 5 km have a website"
 
     # Website analysis
     has_real_website: bool
