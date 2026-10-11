@@ -32,7 +32,7 @@ _IGNORE_EMAIL_DOMAINS = {
 _IGNORE_EMAIL_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js")
 _IGNORE_LOCAL_PARTS = ("noreply", "no-reply", "donotreply", "do-not-reply", "privacy", "abuse", "postmaster")
 
-_SOCIAL_PATTERNS = {
+SOCIAL_PATTERNS = {
     "facebook_url": re.compile(r"^https?://(?:[a-z]+\.)?facebook\.com/(?!sharer|share|plugins|tr\b|dialog)[^?#]+", re.I),
     "instagram_url": re.compile(r"^https?://(?:www\.)?instagram\.com/(?!p/|share)[^?#]+", re.I),
     "company_linkedin": re.compile(r"^https?://(?:[a-z]+\.)?linkedin\.com/company/[^?#]+", re.I),
@@ -131,6 +131,8 @@ def _walk_jsonld(node, people: list, org: dict) -> None:
                 value = {**value, "jobTitle": "Owner" if key == "owner" else "Founder"}
             _walk_jsonld(value, people, org)
     if any(t for t in types if t not in ("Person", "WebPage", "WebSite", "BreadcrumbList")):
+        if isinstance(node.get("aggregateRating"), dict) and "aggregate_rating" not in org:
+            org["aggregate_rating"] = node["aggregateRating"]
         for key in ("email", "telephone"):
             if isinstance(node.get(key), str):
                 org.setdefault(key + "s", []).append(node[key])
@@ -179,7 +181,7 @@ def extract(pages: list[tuple[str, str]]) -> dict:
                 hrefs.append(urljoin(url, href))
 
         for link in hrefs + [s for s in org.get("sameAs", []) if isinstance(s, str)]:
-            for key, pattern in _SOCIAL_PATTERNS.items():
+            for key, pattern in SOCIAL_PATTERNS.items():
                 if key not in socials and (m := pattern.match(link)):
                     socials[key] = m.group(0).rstrip("/")
 
@@ -205,5 +207,6 @@ def extract(pages: list[tuple[str, str]]) -> dict:
         "phones": phones,
         "socials": socials,
         "people": [{**p, "source": "website_schema"} for p in people if p.get("name")],
+        "aggregate_rating": org.get("aggregate_rating"),
         "text": combined[:PAGE_TEXT_LIMIT],
     }

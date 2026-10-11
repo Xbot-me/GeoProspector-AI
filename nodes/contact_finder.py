@@ -11,6 +11,8 @@ the best owner and the best email to send to.
   3. UK Companies House officers (if COMPANIES_HOUSE_API_KEY and a UK address)
   4. DuckDuckGo: Facebook / Instagram / LinkedIn company page, the owner's
      LinkedIn profile, and last-resort owner name and email searches
+  5. Emails and social links from the places listing itself (Overture)
+  6. Rating + review count when the places provider has none (enrichment/reviews.py)
 
 Everything found is kept in contacts_json; the chosen values go into the
 regular columns (email, owner_name, owner_role, owner_linkedin, ...).
@@ -19,7 +21,7 @@ import json
 import logging
 import re
 
-from enrichment import ai_extract, companies_house, hunter, web_search, website
+from enrichment import ai_extract, companies_house, hunter, reviews, web_search, website
 from email_verifier import verify_email
 from state import BusinessState
 
@@ -118,6 +120,7 @@ def find_contacts(state: BusinessState) -> dict:
     phones: list[str] = []
     socials: dict[str, str] = {}
     sources: list[str] = []
+    site = None
 
     # 1. The business's own website
     if url and domain and quality != "dead":
@@ -129,6 +132,17 @@ def find_contacts(state: BusinessState) -> dict:
         people += ai_extract.extract_people(site["text"], name)
         if site["emails"] or site["people"]:
             sources.append("website")
+
+    # 1b. Contacts already in the places listing (Overture has emails + socials)
+    for raw in state.get("listing_emails") or []:
+        if clean := website.clean_email(raw):
+            emails.append({"value": clean, "source": "listing"})
+    for link in state.get("listing_socials") or []:
+        for key, pattern in website.SOCIAL_PATTERNS.items():
+            if key not in socials and (m := pattern.match(link)):
+                socials[key] = m.group(0).rstrip("/")
+    if state.get("listing_emails") or state.get("listing_socials"):
+        sources.append("listing")
 
     # 2. Hunter.io
     h = hunter.domain_search(domain)
@@ -189,6 +203,10 @@ def find_contacts(state: BusinessState) -> dict:
         except Exception as e:
             logger.error(f"Email verification error for {email}: {e}")
 
+    review = None
+    if not state.get("review_count"):
+        review = reviews.find_reviews(name, address, site)
+
     existing = state.get("contact_sources")
     contacts = {
         "people": people,
@@ -208,4 +226,5 @@ def find_contacts(state: BusinessState) -> dict:
         "instagram_url": socials.get("instagram_url"),
         "contacts_json": json.dumps(contacts),
         "contact_sources": ", ".join(([existing] if existing else []) + sources) or None,
+        **(review or {}),
     }
